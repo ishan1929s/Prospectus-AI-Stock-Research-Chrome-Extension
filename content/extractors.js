@@ -30,7 +30,16 @@ class FinancialExtractors {
     const url = window.location.href.toLowerCase();
     const hostname = window.location.hostname.toLowerCase();
     const pathname = window.location.pathname.toLowerCase();
-    const bodyText = document.body ? document.body.innerText : '';
+
+    // Fast non-blocking helper for text sniffing without forcing synchronous layout/reflow
+    let cachedBodySnippet = null;
+    const getBodySnippet = () => {
+      if (cachedBodySnippet === null) {
+        // textContent does NOT trigger layout reflow and is 50x-100x faster than innerText
+        cachedBodySnippet = document.body ? (document.body.textContent || '').slice(0, 30000) : '';
+      }
+      return cachedBodySnippet;
+    };
 
     // 1. SEC EDGAR (Filing documents, company browse, search results with CIK)
     if (hostname.includes('sec.gov')) {
@@ -42,7 +51,7 @@ class FinancialExtractors {
         return this.extractUniversal();
       }
 
-      const isSecPage =
+      const isSecUrl =
         url.includes('/browse/') ||
         url.includes('/ix?doc=') ||
         url.includes('/archives/edgar/data/') ||
@@ -50,46 +59,34 @@ class FinancialExtractors {
         url.includes('cik=') ||
         url.includes('type=10-k') ||
         url.includes('type=10-q') ||
-        url.includes('type=8-k') ||
-        bodyText.includes('FORM 10-K') ||
-        bodyText.includes('FORM 10-Q') ||
-        bodyText.includes('FORM 8-K') ||
-        bodyText.includes('Item 1A') ||
-        bodyText.includes('UNITED STATES SECURITIES AND EXCHANGE COMMISSION');
+        url.includes('type=8-k');
 
-      if (isSecPage) {
+      const isSecContent =
+        isSecUrl ||
+        getBodySnippet().includes('FORM 10-K') ||
+        getBodySnippet().includes('FORM 10-Q') ||
+        getBodySnippet().includes('FORM 8-K') ||
+        getBodySnippet().includes('Item 1A') ||
+        getBodySnippet().includes('UNITED STATES SECURITIES AND EXCHANGE COMMISSION');
+
+      if (isSecContent) {
         return this.extractSecEdgar();
       }
     }
 
     // 2. Standalone Demo / Test Page with Filing Markup
-    if (
-      url.includes('demo.html') ||
-      (bodyText.includes('FORM 10-K') && bodyText.includes('Risk Factors'))
-    ) {
+    if (url.includes('demo.html')) {
       return this.extractSecEdgar();
     }
 
-    // 3. Yahoo Finance (Quote, News, Financials, or Analysis tabs)
+    // 3. Yahoo Finance (Quote, News, Markets, or Analysis articles)
     if (hostname.includes('finance.yahoo.com')) {
-      const isYahooReport =
-        pathname.includes('/quote/') ||
-        pathname.includes('/news/') ||
-        pathname.includes('/m/');
-      if (isYahooReport) {
-        return this.extractYahooFinance();
-      }
+      return this.extractYahooFinance();
     }
 
     // 4. Seeking Alpha (Articles, Transcripts, Symbol pages)
     if (hostname.includes('seekingalpha.com')) {
-      const isSAReport =
-        pathname.includes('/article/') ||
-        pathname.includes('/symbol/') ||
-        pathname.includes('/earnings/');
-      if (isSAReport) {
-        return this.extractSeekingAlpha();
-      }
+      return this.extractSeekingAlpha();
     }
 
     // 5. TradingView (Symbol or Chart pages)
@@ -101,9 +98,7 @@ class FinancialExtractors {
 
     // 6. MarketWatch (Stock quote or Story articles)
     if (hostname.includes('marketwatch.com')) {
-      if (pathname.includes('/investing/stock/') || pathname.includes('/story/') || pathname.includes('/articles/')) {
-        return this.extractMarketWatch();
-      }
+      return this.extractMarketWatch();
     }
 
     // 7. Finviz (Quote pages)
@@ -111,6 +106,16 @@ class FinancialExtractors {
       if (url.includes('quote.ashx?t=')) {
         return this.extractFinviz();
       }
+    }
+
+    // 8. PDF Documents (.pdf URLs, embedded PDF viewers)
+    if (
+      pathname.endsWith('.pdf') ||
+      url.includes('.pdf') ||
+      (document.contentType && document.contentType.includes('pdf')) ||
+      (typeof document !== 'undefined' && document.querySelector && document.querySelector('embed[type="application/pdf"]'))
+    ) {
+      return this.extractPdfDocument();
     }
 
     // Non-report or generic webpage fallback
@@ -124,17 +129,17 @@ class FinancialExtractors {
     const title = document.title;
     const bodyText = document.body ? document.body.innerText : '';
     const url = window.location.href;
+    let ticker = '';
+    let company = '';
+    let formType = 'Filing';
+    let filingDate = '';
+    let exchange = '';
+    let sector = '';
 
-    let ticker = 'NWMC';
-    let company = 'Northwind Materials Co.';
-    let formType = '10-K';
-    let filingDate = 'Aug 1, 2026';
-    let exchange = 'NYSE';
-    let sector = 'Industrials';
-
-    // Parse URL params
+    // Parse URL params or URL path (e.g. /edgar/data/320193/...)
     const urlParams = new URLSearchParams(window.location.search);
-    const cikParam = urlParams.get('CIK') || urlParams.get('cik');
+    const pathCikMatch = url.match(/\/data\/(\d+)\//i);
+    const cikParam = urlParams.get('CIK') || urlParams.get('cik') || (pathCikMatch ? pathCikMatch[1] : null);
     const typeParam = urlParams.get('type') || urlParams.get('type');
 
     if (cikParam) {
@@ -172,6 +177,20 @@ class FinancialExtractors {
       const parts = title.split('-');
       if (parts[0] && parts[0].trim().length > 2) {
         company = parts[0].replace(/EDGAR\s+Search\s+Results/i, '').trim();
+      }
+    }
+
+    // Check body text for standard SEC header patterns (e.g. "Ticker Symbol: NWMC (NYSE)", "Company Name: Northwind Materials")
+    const tickerMatch = bodyText.match(/(?:Ticker Symbol|Ticker|Symbol)[\s:]+([A-Z]{1,5})(?:\s*\(([A-Z]+)\))?/i);
+    if (tickerMatch && tickerMatch[1]) {
+      ticker = tickerMatch[1].toUpperCase().trim();
+      if (tickerMatch[2]) exchange = tickerMatch[2].toUpperCase().trim();
+    }
+    const compMatch = bodyText.match(/(?:Company Name|Entity Name|Registrant Name|EXACT NAME OF REGISTRANT)[\s:]+([^\n\r]+)/i);
+    if (compMatch && compMatch[1]) {
+      const cleanComp = compMatch[1].replace(/Commission File Number.*/i, '').trim();
+      if (cleanComp && cleanComp.length > 2 && !cleanComp.includes('EDGAR')) {
+        company = cleanComp;
       }
     }
 
@@ -244,44 +263,132 @@ class FinancialExtractors {
    */
   static extractYahooFinance() {
     const path = window.location.pathname;
-    let ticker = 'AAPL';
-    let company = 'Apple Inc.';
-    let exchange = 'NASDAQ';
-    let sector = 'Technology';
+    const isQuote = path.includes('/quote/');
+    
+    // Clean title by stripping site suffixes
+    const rawTitle = document.title || '';
+    const cleanTitle = rawTitle.replace(/\s*[-–|]\s*Yahoo\s*(Finance|News).*$/i, '').trim();
 
-    const tickerMatch = path.match(/\/quote\/([A-Za-z0-9.-]+)/i);
-    if (tickerMatch) ticker = tickerMatch[1].toUpperCase();
+    if (isQuote) {
+      let ticker = '';
+      let company = '';
+      let exchange = 'US';
+      let sector = 'Equities';
 
-    const header = document.querySelector('h1.yf-xx, h1[data-testid="quote-hdr"], header h1');
-    if (header && header.innerText) {
-      const parts = header.innerText.split('(');
-      company = parts[0].trim();
-      if (parts[1]) ticker = parts[1].replace(')', '').trim().toUpperCase();
+      const tickerMatch = path.match(/\/quote\/([A-Za-z0-9.-]+)/i);
+      if (tickerMatch) ticker = tickerMatch[1].toUpperCase();
+
+      // 1. Try extracting company & ticker from document.title (standard format: "Apple Inc. (AAPL) Stock Price...")
+      const titleMatch = rawTitle.match(/^([^(]+?)\s*\(\s*([A-Za-z0-9.-]+)\s*\)/);
+      if (titleMatch) {
+        const tComp = titleMatch[1].trim();
+        const tTick = titleMatch[2].toUpperCase();
+        if (tComp && !tComp.toLowerCase().includes('yahoo')) {
+          company = tComp;
+        }
+        if (!ticker && tTick) {
+          ticker = tTick;
+        }
+      }
+
+      // 2. Look for quote header in DOM (avoiding generic header h1 which may contain "Yahoo Finance")
+      const quoteHeader = document.querySelector('section[data-testid="quote-hdr"] h1, div[data-testid="quote-hdr"] h1, [data-testid="quote-header"] h1, h1[class*="yf-"]');
+      if (quoteHeader && quoteHeader.innerText) {
+        const headerText = quoteHeader.innerText.trim();
+        if (!headerText.toLowerCase().includes('yahoo')) {
+          const parts = headerText.split('(');
+          const hComp = parts[0].trim();
+          if (hComp && !hComp.toLowerCase().includes('yahoo')) {
+            company = hComp;
+          }
+          if (parts[1] && !ticker) {
+            ticker = parts[1].replace(')', '').trim().toUpperCase();
+          }
+        }
+      }
+
+      // 3. Fallback to known registry if company is still empty, generic, or equals "Yahoo Finance"
+      if (!company || company.toLowerCase().includes('yahoo') || company.toLowerCase() === 'company') {
+        const knownMatch = Object.values(KNOWN_CIKS).find((k) => k.ticker === ticker);
+        if (knownMatch && knownMatch.company) {
+          company = knownMatch.company;
+        } else if (ticker) {
+          const cleanBeforePrice = cleanTitle.replace(/\s*(?:Stock Price|Stock Quote|Quote|History).*$/i, '').replace(/\s*\([A-Z0-9.-]+\)\s*/i, '').trim();
+          if (cleanBeforePrice && !cleanBeforePrice.toLowerCase().includes('yahoo') && cleanBeforePrice.length < 50) {
+            company = cleanBeforePrice;
+          } else {
+            company = ticker;
+          }
+        } else {
+          company = 'Company';
+        }
+      }
+
+      const headlines = [];
+      document.querySelectorAll('section[data-testid="storyitem"] h3, ul.stream-items li h3, #news h3, div[data-testid="news-item"] h3').forEach((node) => {
+        const text = node.innerText.trim();
+        if (text && !headlines.includes(text)) headlines.push(text);
+      });
+
+      const descEl = document.querySelector('section[data-testid="description"], .quote-sub-section');
+      const descText = descEl ? descEl.innerText.trim() : '';
+      const cleanBody = this.cleanSectionText(document.body ? document.body.innerText : '');
+
+      return {
+        isFinanceSite: true,
+        isReportPage: true,
+        siteType: 'yahoo_finance',
+        ticker: ticker || 'QUOTE',
+        company,
+        exchange,
+        sector,
+        formType: 'Equity Overview',
+        filingDate: 'Live Feed',
+        periodBadge: `${ticker || 'QUOTE'} · Realtime`,
+        headlines: headlines.slice(0, 10),
+        fullText: `Company: ${company} (${ticker})\n\nRecent News & Headlines:\n${headlines.join('\n')}\n\nCompany Overview & Metrics:\n${descText || cleanBody.slice(0, 15000)}`,
+      };
     }
 
-    const headlines = [];
-    document.querySelectorAll('section[data-testid="storyitem"] h3, ul.stream-items li h3, #news h3, div[data-testid="news-item"] h3').forEach((node) => {
-      const text = node.innerText.trim();
-      if (text && !headlines.includes(text)) headlines.push(text);
-    });
+    // Article / Story on Yahoo Finance (e.g. /markets/stocks/articles/..., /news/...)
+    const h1El = document.querySelector('article h1, main h1, h1.yf-xx');
+    const articleHeadline = h1El && !h1El.innerText.toLowerCase().includes('yahoo')
+      ? h1El.innerText.trim()
+      : (cleanTitle && !cleanTitle.toLowerCase().includes('yahoo') ? cleanTitle : 'Market Article');
 
-    const descEl = document.querySelector('section[data-testid="description"], .quote-sub-section');
-    const descText = descEl ? descEl.innerText.trim() : '';
-    const cleanBody = this.cleanSectionText(document.body ? document.body.innerText : '');
+    // Detect mentioned company or ticker from article
+    let ticker = '';
+    const tickerTag = document.querySelector('a[data-testid="ticker-container"], .yf-quote-tag, a[href*="/quote/"]');
+    if (tickerTag && tickerTag.innerText) {
+      ticker = tickerTag.innerText.replace(/[^A-Za-z0-9.-]/g, '').trim().toUpperCase();
+    }
+
+    // If a stock ticker was identified from the article, resolve the stock company name
+    let companyName = articleHeadline;
+    if (ticker && ticker !== 'ARTICLE') {
+      const knownMatch = Object.values(KNOWN_CIKS).find((k) => k.ticker === ticker);
+      companyName = knownMatch ? knownMatch.company : ticker;
+    } else if (companyName.toLowerCase().includes('yahoo')) {
+      companyName = 'Market Article';
+    }
+
+    // Extract main article body
+    const articleBodyEl = document.querySelector('.caas-body, article, div.body, [data-testid="article-body"], main');
+    const articleText = articleBodyEl ? this.cleanSectionText(articleBodyEl.innerText) : this.cleanSectionText(document.body ? document.body.innerText : '');
 
     return {
       isFinanceSite: true,
       isReportPage: true,
-      siteType: 'yahoo_finance',
-      ticker,
-      company,
-      exchange,
-      sector,
-      formType: 'Equity Research',
-      filingDate: 'Live Feed',
-      periodBadge: `${exchange} · Live Data`,
-      headlines: headlines.slice(0, 10),
-      fullText: `Company: ${company} (${ticker})\nSector: ${sector}\n\nRecent News Coverage:\n${headlines.join('\n')}\n\nOverview:\n${descText || cleanBody.slice(0, 15000)}`,
+      siteType: 'yahoo_finance_article',
+      ticker: ticker || 'ARTICLE',
+      company: companyName,
+      exchange: 'News',
+      sector: 'Market Analysis',
+      formType: 'Market Article',
+      filingDate: new Date().toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }),
+      periodBadge: `Article · ${ticker || 'Market'}`,
+      headlines: [articleHeadline],
+      fullText: `Article Headline: ${articleHeadline}\n\nArticle Content:\n${articleText.slice(0, 18000)}`,
     };
   }
 
@@ -410,20 +517,105 @@ class FinancialExtractors {
   }
 
   /**
+   * Helper to detect if a generic webpage contains finance/market signals
+   */
+  static isFinancialContent(text = '', title = '', url = '') {
+    const combined = `${url} ${title} ${text.slice(0, 16000)}`.toLowerCase();
+    const financialTerms = [
+      'revenue', 'gross margin', 'operating margin', 'net income', 'ebitda',
+      'earnings report', 'earnings call', 'quarterly results', 'fiscal year',
+      'balance sheet', 'cash flow', 'free cash flow', 'shareholder', 'dividend',
+      'sec filing', 'form 10-k', 'form 10-q', 'form 8-k', 'form 20-f', 'form s-1',
+      'risk factors', 'capex', 'capital expenditure', 'market cap', 'eps',
+      'investor relations', 'nasdaq:', 'nyse:', 'debt maturity', 'operating cash flow',
+      'stock price', 'financial statements', 'quarterly earnings', 'annual report',
+      'guidance', 'profitability'
+    ];
+
+    let matches = 0;
+    for (const term of financialTerms) {
+      if (combined.includes(term)) {
+        matches++;
+      }
+    }
+    return matches >= 2;
+  }
+
+  /**
+   * PDF Document Parser
+   */
+  static extractPdfDocument() {
+    const rawTitle = document.title || '';
+    const pathname = window.location.pathname || '';
+    const filename = pathname.split('/').pop().replace(/\.pdf$/i, '') || 'Financial Report';
+    const cleanName = decodeURIComponent(filename).replace(/[-_]/g, ' ');
+    const pageTitle = (rawTitle && !rawTitle.endsWith('.pdf') && rawTitle !== cleanName) ? rawTitle : cleanName;
+
+    // Check if innerText or embedded text is present
+    const bodyText = document.body ? this.cleanSectionText(document.body.innerText) : '';
+    const isFinancial = this.isFinancialContent(bodyText, pageTitle, window.location.href);
+
+    let ticker = 'PDF';
+    let company = pageTitle.slice(0, 60);
+    let exchange = isFinancial ? 'Financial PDF' : 'PDF Document';
+
+    // Detect Berkshire Hathaway or known companies in document
+    const lowerBody = (bodyText + ' ' + pageTitle).toLowerCase();
+    if (lowerBody.includes('berkshire hathaway')) {
+      ticker = 'BRK.B';
+      company = 'Berkshire Hathaway Inc.';
+      exchange = 'NYSE';
+    } else {
+      for (const [cik, info] of Object.entries(KNOWN_CIKS)) {
+        if (lowerBody.includes(info.company.toLowerCase()) || (info.ticker && lowerBody.includes(info.ticker.toLowerCase()))) {
+          ticker = info.ticker;
+          company = info.company;
+          exchange = info.exchange || exchange;
+          break;
+        }
+      }
+    }
+
+    return {
+      isFinanceSite: isFinancial,
+      isReportPage: isFinancial,
+      siteType: 'pdf_document',
+      ticker,
+      company,
+      exchange,
+      sector: isFinancial ? 'Financial Analysis' : 'PDF Document',
+      formType: isFinancial ? 'PDF Report' : 'PDF File',
+      filingDate: new Date().toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }),
+      periodBadge: 'PDF Document',
+      headlines: [pageTitle],
+      fullText: bodyText && bodyText.length > 50
+        ? `Topic / Document: ${pageTitle}\n\nExtracted Content:\n${bodyText.slice(0, 20000)}`
+        : `Topic / Document: ${pageTitle} (PDF Document)\n\nURL: ${window.location.href}`,
+    };
+  }
+
+  /**
    * 7. Universal Fallback for any general page
    */
   static extractUniversal() {
-    const title = document.title || 'Web Document';
-    const h1 = document.querySelector('h1');
-    const pageHeading = h1 ? h1.innerText.trim() : title;
+    const rawTitle = document.title || 'Web Document';
+    const cleanTitle = rawTitle
+      .replace(/\s*[-–|]\s*(Yahoo\s*Finance|Bloomberg|Reuters|CNBC|Seeking\s*Alpha|MarketWatch|Financial\s*Times|WSJ|Wall\s*Street\s*Journal|Forbes|CNN|Business\s*Insider|TechCrunch|The\s*Verge|Medium|Substack).*$/i, '')
+      .trim();
 
-    // Clean body text by stripping DOM navigation noise
-    const clone = document.body ? document.body.cloneNode(true) : null;
+    const h1 = document.querySelector('article h1, main h1, h1');
+    const pageHeading = h1 ? h1.innerText.trim() : (cleanTitle || 'Web Article');
+
+    // Clean body text by extracting main article container or stripping noise
+    const mainEl = document.querySelector('article, main, .article-content, .post-content, #content, .content');
+    const sourceEl = mainEl || document.body;
+
+    const clone = sourceEl ? sourceEl.cloneNode(true) : null;
     if (clone) {
       const removeSelectors = [
         'script', 'style', 'nav', 'footer', 'header', 'noscript', 'iframe',
         '#prospectus-root', '.cookie-banner', '.advertisement', '.ad-slot',
-        'aside', '.sidebar', '.social-share'
+        'aside', '.sidebar', '.social-share', '.comments', '#comments'
       ];
       removeSelectors.forEach((sel) => {
         clone.querySelectorAll(sel).forEach((el) => el.remove());
@@ -431,20 +623,41 @@ class FinancialExtractors {
     }
 
     const cleanText = clone ? this.cleanSectionText(clone.innerText) : '';
+    const isFinancial = this.isFinancialContent(cleanText, rawTitle, window.location.href);
+
+    let ticker = 'PAGE';
+    let company = pageHeading.slice(0, 60);
+    let exchange = isFinancial ? 'Financial Media' : 'Web';
+
+    const lowerCombined = `${pageHeading} ${rawTitle} ${cleanText.slice(0, 3000)}`.toLowerCase();
+    if (lowerCombined.includes('berkshire hathaway')) {
+      ticker = 'BRK.B';
+      company = 'Berkshire Hathaway Inc.';
+      exchange = 'NYSE';
+    } else {
+      for (const [cik, info] of Object.entries(KNOWN_CIKS)) {
+        if (lowerCombined.includes(info.company.toLowerCase()) || (info.ticker && lowerCombined.includes(`(${info.ticker.toLowerCase()})`))) {
+          ticker = info.ticker;
+          company = info.company;
+          exchange = info.exchange || exchange;
+          break;
+        }
+      }
+    }
 
     return {
-      isFinanceSite: false,
-      isReportPage: false,
-      siteType: 'generic_web',
-      ticker: 'PAGE',
-      company: pageHeading.slice(0, 45),
-      exchange: 'Web',
-      sector: 'Article / Document',
-      formType: 'Web Document',
+      isFinanceSite: isFinancial,
+      isReportPage: isFinancial,
+      siteType: isFinancial ? 'financial_web' : 'generic_web',
+      ticker,
+      company,
+      exchange,
+      sector: isFinancial ? 'Financial Analysis' : 'General Webpage',
+      formType: isFinancial ? 'Article / Report' : 'General Document',
       filingDate: new Date().toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }),
-      periodBadge: 'General Page',
+      periodBadge: isFinancial ? `${ticker !== 'PAGE' ? ticker + ' · ' : ''}Financial Article` : 'General Page',
       headlines: [pageHeading],
-      fullText: `Document: ${pageHeading}\nSource: ${window.location.hostname}\n\nContent:\n${cleanText.slice(0, 15000)}`,
+      fullText: `Topic / Headline: ${pageHeading}\n\nContent:\n${cleanText.slice(0, 18000)}`,
     };
   }
 

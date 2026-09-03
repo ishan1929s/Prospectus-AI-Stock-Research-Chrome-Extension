@@ -51,21 +51,53 @@ document.addEventListener('DOMContentLoaded', async () => {
     licenseTag.style.color = '#a9583e';
   }
 
-  // Button actions
+  // Check if active tab is on YouTube (Extension is inactive on YouTube)
+  const isYouTube = activeTab && activeTab.url && (activeTab.url.includes('youtube.com') || activeTab.url.includes('youtu.be'));
+  if (isYouTube) {
+    statusDot.className = 'status-dot';
+    statusDot.style.background = '#8a877f';
+    apiStatus.textContent = 'Inactive on YouTube';
+    btnToggle.disabled = true;
+    btnToggle.style.opacity = '0.45';
+    btnToggle.style.cursor = 'not-allowed';
+    btnToggle.title = 'Prospectus is inactive on YouTube';
+    btnAnalyze.disabled = true;
+    btnAnalyze.style.opacity = '0.45';
+    btnAnalyze.style.cursor = 'not-allowed';
+    btnAnalyze.title = 'Prospectus is inactive on YouTube';
+    return;
+  }
   btnToggle.addEventListener('click', async () => {
     if (activeTab && activeTab.id) {
+      const isPdf = (activeTab.url || '').includes('.pdf') || (activeTab.url || '').startsWith('file:///');
+      if (isPdf && chrome.sidePanel && chrome.sidePanel.open) {
+        try {
+          await chrome.sidePanel.open({ tabId: activeTab.id, windowId: activeTab.windowId });
+          window.close();
+          return;
+        } catch (e) {}
+      }
+
       chrome.tabs.sendMessage(activeTab.id, { action: 'TOGGLE_PANEL' }).catch(async () => {
-        await chrome.scripting.executeScript({
-          target: { tabId: activeTab.id },
-          files: [
-            'services/storage-service.js',
-            'services/license-service.js',
-            'services/ai-service.js',
-            'content/extractors.js',
-            'content/diff-engine.js',
-            'content/content.js',
-          ],
-        });
+        if (chrome.sidePanel && chrome.sidePanel.open) {
+          try {
+            await chrome.sidePanel.open({ tabId: activeTab.id, windowId: activeTab.windowId });
+            return;
+          } catch (e) {}
+        }
+        try {
+          await chrome.scripting.executeScript({
+            target: { tabId: activeTab.id },
+            files: [
+              'services/storage-service.js',
+              'services/license-service.js',
+              'services/ai-service.js',
+              'content/extractors.js',
+              'content/diff-engine.js',
+              'content/content.js',
+            ],
+          });
+        } catch (err) {}
       });
     }
     window.close();
@@ -73,18 +105,35 @@ document.addEventListener('DOMContentLoaded', async () => {
 
   btnAnalyze.addEventListener('click', async () => {
     if (activeTab && activeTab.id) {
+      const isPdf = (activeTab.url || '').includes('.pdf') || (activeTab.url || '').startsWith('file:///');
+      if (isPdf && chrome.sidePanel && chrome.sidePanel.open) {
+        try {
+          await chrome.sidePanel.open({ tabId: activeTab.id, windowId: activeTab.windowId });
+          window.close();
+          return;
+        } catch (e) {}
+      }
+
       chrome.tabs.sendMessage(activeTab.id, { action: 'TOGGLE_PANEL' }).catch(async () => {
-        await chrome.scripting.executeScript({
-          target: { tabId: activeTab.id },
-          files: [
-            'services/storage-service.js',
-            'services/license-service.js',
-            'services/ai-service.js',
-            'content/extractors.js',
-            'content/diff-engine.js',
-            'content/content.js',
-          ],
-        });
+        if (chrome.sidePanel && chrome.sidePanel.open) {
+          try {
+            await chrome.sidePanel.open({ tabId: activeTab.id, windowId: activeTab.windowId });
+            return;
+          } catch (e) {}
+        }
+        try {
+          await chrome.scripting.executeScript({
+            target: { tabId: activeTab.id },
+            files: [
+              'services/storage-service.js',
+              'services/license-service.js',
+              'services/ai-service.js',
+              'content/extractors.js',
+              'content/diff-engine.js',
+              'content/content.js',
+            ],
+          });
+        } catch (err) {}
       });
     }
     window.close();

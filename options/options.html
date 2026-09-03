@@ -54,23 +54,32 @@
       <div class="form-group">
         <label for="ai-provider-select">Provider</label>
         <select id="ai-provider-select" class="text-input">
-          <option value="openai">OpenAI (GPT-4o, GPT-4o-mini)</option>
-          <option value="anthropic">Anthropic Claude (Claude 3.5 Sonnet / Haiku)</option>
-          <option value="gemini">Google Gemini (Gemini 2.0 Flash, 1.5 Pro)</option>
-          <option value="openrouter">OpenRouter (Multi-model)</option>
-          <option value="custom">Custom / Local Endpoint (OpenAI-compatible / Ollama)</option>
+          <option value="anthropic">Claude (Recommended)</option>
+          <option value="openai">OpenAI</option>
+          <option value="gemini">Google Gemini</option>
+          <option value="openrouter">OpenRouter</option>
+          <option value="custom">Custom Endpoint (OpenAI-compatible / Ollama)</option>
         </select>
+      </div>
+
+      <div class="form-group" id="group-model-name">
+        <label for="model-select">Model Name</label>
+        <select id="model-select" class="text-input">
+          <!-- Populated dynamically based on selected provider -->
+        </select>
+        <input
+          type="text"
+          id="model-name-custom-input"
+          placeholder="Enter custom model name (e.g. claude-3-7-sonnet-20250219)..."
+          class="text-input"
+          style="display: none; margin-top: 8px;"
+        />
       </div>
 
       <div class="form-group">
         <label for="api-key-input">API Key</label>
         <input type="password" id="api-key-input" placeholder="Enter your provider API key..." class="text-input" />
         <span class="field-hint">Keys are never sent to our servers. Direct browser-to-provider only.</span>
-      </div>
-
-      <div class="form-group" id="group-model-name">
-        <label for="model-name-input">Model Name</label>
-        <input type="text" id="model-name-input" value="gpt-4o-mini" class="text-input" />
       </div>
 
       <div class="form-group" id="group-custom-endpoint" style="display: none;">
@@ -93,7 +102,7 @@
     <!-- Layout & Dimensions -->
     <section class="settings-card">
       <h2>Layout & Dimensions</h2>
-      <p class="section-subtext">Customize the default width of the Prospectus sidebar and the vertical length of the Deep Research Q&A section. You can also resize interactively on any page by dragging the panel handles.</p>
+      <p class="section-subtext">Customize the default width of the Prospectus sidebar and the vertical height/length of the Ask Prospectus dock. You can also resize interactively on any page by dragging the panel handles.</p>
 
       <div class="form-group">
         <label for="sidebar-width-slider">Sidebar Width: <span id="sidebar-width-val">440</span>px</label>
@@ -102,23 +111,71 @@
       </div>
 
       <div class="form-group">
-        <label for="adv-height-slider">Deep Research Section Max Height: <span id="adv-height-val">220</span>px</label>
-        <input type="range" id="adv-height-slider" min="140" max="500" step="10" value="220" class="range-slider" />
-        <span class="field-hint">Range: 140px (Compact dock) to 500px (Expanded reading).</span>
+        <label for="adv-height-slider">Ask Prospectus Section Height: <span id="adv-height-val">240</span>px</label>
+        <input type="range" id="adv-height-slider" min="120" max="650" step="10" value="240" class="range-slider" />
+        <span class="field-hint">Range: 120px (Compact bar) to 650px (Expanded research workstation).</span>
+      </div>
+    </section>
+
+    <!-- Live Search & Grounding -->
+    <section class="settings-card">
+      <h2>Live Web Search & Grounding</h2>
+      <p class="section-subtext">Used by Advanced Live Research and Watchlist News digests. If left blank, Prospectus uses your AI model's built-in search or public financial feeds.</p>
+
+      <div class="form-group">
+        <label for="search-provider-select">Search Engine Provider</label>
+        <select id="search-provider-select" class="text-input">
+          <option value="brave">Brave Search API (Recommended)</option>
+          <option value="tavily">Tavily AI Search</option>
+        </select>
+      </div>
+
+      <div class="form-group">
+        <label for="search-api-key-input">Search API Key (Optional)</label>
+        <input type="password" id="search-api-key-input" placeholder="Enter Brave or Tavily API key..." class="text-input" />
+        <span class="field-hint">Optional: Enables dedicated external web citations for models without native web search.</span>
       </div>
     </section>
 
     <!-- General Automation -->
     <section class="settings-card">
-      <h2>Research & Automation</h2>
-      <p class="section-subtext">Configure background digests and on-demand analysis behavior.</p>
+      <h2>Watchlist Digest & Automation</h2>
+      <p class="section-subtext">Configure client-side background digest schedules, notifications, and auto-refresh limits.</p>
 
       <div class="checkbox-row">
         <input type="checkbox" id="chk-background-watchlist" checked />
         <label for="chk-background-watchlist">
           <strong>Daily Watchlist background digest</strong>
-          <span>Quietly refresh one-line neutral summaries once per 24 hours.</span>
+          <span>Automatically checks SEC EDGAR filings for all tickers and runs AI summaries once per 24 hours.</span>
         </label>
+      </div>
+
+      <div class="checkbox-row" style="margin-top: 14px;">
+        <input type="checkbox" id="chk-desktop-notifications" />
+        <label for="chk-desktop-notifications">
+          <strong>Desktop notifications for major SEC filings</strong>
+          <span>Receive a native browser notification when a new 10-K, 10-Q, or 8-K is filed for your tracked tickers.</span>
+        </label>
+      </div>
+
+      <div class="form-group" style="margin-top: 14px;">
+        <label for="select-options-watchlist-schedule">Automatic Check Interval</label>
+        <select id="select-options-watchlist-schedule" class="select-input">
+          <option value="0">Manual Only (Paused)</option>
+          <option value="30">Every 30 Minutes</option>
+          <option value="60">Every 1 Hour</option>
+          <option value="120">Every 2 Hours</option>
+          <option value="240">Every 4 Hours</option>
+          <option value="480">Every 8 Hours</option>
+          <option value="1440">Daily (Every 24 Hours)</option>
+        </select>
+        <span class="field-hint">Frequency for background SEC EDGAR filing checks and live market scans.</span>
+      </div>
+
+      <div class="form-group" style="margin-top: 16px;">
+        <label for="max-auto-tickers-input">Max auto-summarized news tickers per daily digest: <span id="max-auto-tickers-val">10</span></label>
+        <input type="range" id="max-auto-tickers-input" min="3" max="30" step="1" value="10" class="range-slider" />
+        <span class="field-hint">Controls cost and rate limits. Starred tickers are always prioritized.</span>
       </div>
     </section>
 

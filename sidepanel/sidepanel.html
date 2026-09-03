@@ -1,0 +1,47 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Prospectus Side Panel</title>
+  <link rel="stylesheet" href="../content/panel.css">
+  <style>
+    body {
+      margin: 0;
+      padding: 0;
+      width: 100vw;
+      height: 100vh;
+      background: #faf9f5;
+      overflow: hidden;
+      font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    }
+    .prospectus-panel {
+      position: static !important;
+      width: 100% !important;
+      height: 100vh !important;
+      max-width: 100% !important;
+      border: none !important;
+      box-shadow: none !important;
+      transform: none !important;
+    }
+    .prospectus-dock-toggle {
+      display: none !important;
+    }
+    .prospectus-resize-handle-left {
+      display: none !important;
+    }
+  </style>
+</head>
+<body>
+  <div id="sidepanel-root"></div>
+
+  <script src="../services/storage-service.js"></script>
+  <script src="../services/license-service.js"></script>
+  <script src="../services/ai-service.js"></script>
+  <script src="../services/pdf-extractor.js"></script>
+  <script src="../services/watchlist-service.js"></script>
+  <script src="../content/extractors.js"></script>
+  <script src="../content/diff-engine.js"></script>
+  <script src="sidepanel.js"></script>
+</body>
+</html>

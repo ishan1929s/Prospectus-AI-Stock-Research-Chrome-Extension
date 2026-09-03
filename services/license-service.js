@@ -23,7 +23,61 @@ class LicenseService {
     // 1. If Gumroad product permalink is provided, verify against Gumroad API
     if (productPermalink) {
       try {
-        const res = await fetch('https://api.gumroad.com/v2/licenses/verify', {
+        let res = null;
+        if (typeof chrome !== 'undefined' && chrome.runtime && chrome.runtime.id && chrome.runtime.sendMessage) {
+          try {
+            const proxyRes = await new Promise((resolve, reject) => {
+              try {
+                chrome.runtime.sendMessage(
+                  {
+                    action: 'FETCH_PROXY',
+                    url: 'https://api.gumroad.com/v2/licenses/verify',
+                    options: {
+                      method: 'POST',
+                      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+                      body: new URLSearchParams({
+                        product_permalink: productPermalink,
+                        license_key: key,
+                      }).toString(),
+                    },
+                  },
+                  (r) => {
+                    try {
+                      if (chrome.runtime && chrome.runtime.id && chrome.runtime.lastError) {
+                        return reject(new Error(chrome.runtime.lastError.message));
+                      }
+                      resolve(r);
+                    } catch (e) {
+                      reject(new Error('Extension context invalidated'));
+                    }
+                  }
+                );
+              } catch (e) {
+                reject(new Error('Extension context invalidated'));
+              }
+            });
+            if (proxyRes && proxyRes.data) {
+              const data = proxyRes.data;
+              if (data.success && !data.purchase?.refunded && !data.purchase?.chargebacked) {
+                return {
+                  valid: true,
+                  message: 'License verified via Gumroad!',
+                  details: {
+                    email: data.purchase?.email,
+                    variants: data.purchase?.variants,
+                  },
+                };
+              } else {
+                return {
+                  valid: false,
+                  message: data.message || 'Invalid Gumroad license key.',
+                };
+              }
+            }
+          } catch (e) {}
+        }
+
+        res = await fetch('https://api.gumroad.com/v2/licenses/verify', {
           method: 'POST',
           headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
           body: new URLSearchParams({

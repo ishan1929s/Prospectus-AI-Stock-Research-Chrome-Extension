@@ -124,32 +124,13 @@ class FilingDiffEngine {
   }
 
   static escapeHTML(str) {
-    return str
+    if (str === null || str === undefined) return '';
+    return String(str)
       .replace(/&/g, '&amp;')
       .replace(/</g, '&lt;')
       .replace(/>/g, '&gt;')
       .replace(/"/g, '&quot;')
       .replace(/'/g, '&#039;');
-  }
-
-  /**
-   * Sample Default Baseline Text (for testing & zero-setup demonstration)
-   */
-  static getDefaultBaselineText(ticker = 'NWMC') {
-    return `Item 1A. Risk Factors.
-Our business and operations are subject to risks including general industrial demand cycles and commodity chemical pricing fluctuations.
-We maintain distribution relationships with regional supply partners across North America and Europe.
-Our capital expenditure guidance for the fiscal year remains focused on maintenance of our primary processing facility in Ohio.
-The company is currently defending an intellectual property claim filed in Q3 regarding specialty resin formulations, which management believes is without merit.
-Environmental compliance regulations continue to represent an ongoing operational cost across all manufacturing units.`;
-  }
-
-  static getDefaultCurrentText(ticker = 'NWMC') {
-    return `Item 1A. Risk Factors.
-Our business and operations are subject to risks including general industrial demand cycles and commodity chemical pricing fluctuations.
-We face significant single-source supplier concentration risks for specialty precursor chemicals sourced from two facilities in Southeast Asia, where geopolitical or logistics disruptions could halt coatings production.
-Our capital expenditure guidance for the fiscal year has been increased by $45 million to fund construction of a second processing plant in Texas to support expanded aerospace orders.
-Environmental and decarbonization compliance regulations continue to represent an ongoing operational cost across all manufacturing units.`;
   }
 }
 

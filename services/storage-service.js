@@ -13,28 +13,141 @@ const DEFAULT_SETTINGS = {
   isLicensed: false,
   enableBackgroundWatchlist: true,
   watchlistRefreshHours: 24,
+  watchlistScheduleInterval: 1440, // minutes (30, 60, 120, 240, 480, 1440, or 0 for off)
   theme: 'light', // 'light' (warm cream) | 'dark'
   sidebarWidth: 440, // pixels (340 to 850)
-  deepResearchHeight: 220, // pixels (120 to 550)
+  deepResearchHeight: 240, // pixels (120 to 650)
+  dockToggleTopPercent: 50, // vertical position percent along right side (5% to 95%)
 };
 
 class StorageService {
   constructor() {
-    this.isExtension = typeof chrome !== 'undefined' && chrome.storage && chrome.storage.local;
+    this.isExtension = false;
+    try {
+      this.isExtension = typeof chrome !== 'undefined' && !!chrome.storage && !!chrome.storage.local;
+    } catch (e) {
+      this.isExtension = false;
+    }
+  }
+
+  isContextValid() {
+    try {
+      if (typeof chrome === 'undefined') return false;
+      if (!chrome.runtime || !chrome.runtime.id) return false;
+      if (!chrome.storage || !chrome.storage.local) return false;
+      return true;
+    } catch (e) {
+      return false;
+    }
   }
 
   async get(keys) {
-    if (this.isExtension) {
-      return new Promise((resolve) => {
-        chrome.storage.local.get(keys, (items) => resolve(items || {}));
-      });
+    let result = {};
+    const keyList = Array.isArray(keys) ? keys : typeof keys === 'string' ? [keys] : Object.keys(keys || {});
+
+    if (this.isContextValid()) {
+      try {
+        result = await new Promise((resolve) => {
+          try {
+            if (!this.isContextValid()) {
+              resolve({});
+              return;
+            }
+            chrome.storage.local.get(keys, (items) => {
+              try {
+                if (typeof chrome !== 'undefined' && chrome.runtime && chrome.runtime.id && chrome.runtime.lastError) {
+                  resolve({});
+                } else {
+                  resolve(items || {});
+                }
+              } catch (err) {
+                resolve({});
+              }
+            });
+          } catch (e) {
+            resolve({});
+          }
+        });
+      } catch (e) {
+        result = {};
+      }
     }
-    // Fallback for mock/browser preview
+
+    const fallback = this.getFallback(keyList);
+    const combined = { ...fallback, ...result };
+
+    // If chrome storage returned empty array for a key, but fallback has stored items, prioritize fallback
+    for (const k of keyList) {
+      if ((!combined[k] || (Array.isArray(combined[k]) && combined[k].length === 0)) && fallback[k] && Array.isArray(fallback[k]) && fallback[k].length > 0) {
+        combined[k] = fallback[k];
+      }
+    }
+
+    return combined;
+  }
+
+  async set(items) {
+    // 1. Always mirror to localStorage fallback immediately so page refreshes and standalone demo pages never lose data
+    this.setFallback(items);
+
+    // 2. Persist to chrome.storage.local if extension context is active
+    if (this.isContextValid()) {
+      try {
+        await new Promise((resolve) => {
+          try {
+            if (!this.isContextValid()) {
+              resolve();
+              return;
+            }
+            chrome.storage.local.set(items, () => {
+              try {
+                if (typeof chrome !== 'undefined' && chrome.runtime && chrome.runtime.id && chrome.runtime.lastError) {}
+              } catch (e) {}
+              resolve();
+            });
+          } catch (e) {
+            resolve();
+          }
+        });
+      } catch (e) {}
+    }
+  }
+
+  async remove(keys) {
+    try {
+      if (this.isContextValid()) {
+        return await new Promise((resolve) => {
+          try {
+            if (!this.isContextValid()) {
+              this.removeFallback(keys);
+              resolve();
+              return;
+            }
+            chrome.storage.local.remove(keys, () => {
+              try {
+                if (typeof chrome !== 'undefined' && chrome.runtime && chrome.runtime.id && chrome.runtime.lastError) {}
+              } catch (e) {}
+              resolve();
+            });
+          } catch (err) {
+            this.removeFallback(keys);
+            resolve();
+          }
+        });
+      }
+    } catch (e) {
+      this.removeFallback(keys);
+      return;
+    }
+    this.removeFallback(keys);
+  }
+
+  getFallback(keys) {
     const res = {};
     const keyList = Array.isArray(keys) ? keys : typeof keys === 'string' ? [keys] : Object.keys(keys || {});
     for (const k of keyList) {
       try {
-        const val = localStorage.getItem(`prospectus_${k}`);
+        const val = typeof localStorage !== 'undefined' ? localStorage.getItem(`prospectus_${k}`) : null;
         res[k] = val ? JSON.parse(val) : (keys && typeof keys === 'object' ? keys[k] : undefined);
       } catch (e) {
         res[k] = undefined;
@@ -43,18 +156,27 @@ class StorageService {
     return res;
   }
 
-  async set(items) {
-    if (this.isExtension) {
-      return new Promise((resolve) => {
-        chrome.storage.local.set(items, () => resolve());
-      });
-    }
-    // Fallback for mock/browser preview
-    for (const [k, v] of Object.entries(items)) {
+  setFallback(items) {
+    for (const [k, v] of Object.entries(items || {})) {
       try {
-        localStorage.setItem(`prospectus_${k}`, JSON.stringify(v));
+        if (typeof localStorage !== 'undefined') {
+          localStorage.setItem(`prospectus_${k}`, JSON.stringify(v));
+        }
       } catch (e) {
-        console.error('Storage save error:', e);
+        console.warn('Fallback storage set warning:', e.message);
+      }
+    }
+  }
+
+  removeFallback(keys) {
+    const keyList = Array.isArray(keys) ? keys : typeof keys === 'string' ? [keys] : [];
+    for (const k of keyList) {
+      try {
+        if (typeof localStorage !== 'undefined') {
+          localStorage.removeItem(`prospectus_${k}`);
+        }
+      } catch (e) {
+        // ignore
       }
     }
   }
@@ -82,76 +204,153 @@ class StorageService {
     };
   }
 
-  // --- Filing Snapshots (For "What Changed" Diff Engine) ---
+  // --- Filing & Page Snapshots (For "What Changed" Diff Engine) ---
   async getFilingSnapshot(ticker, formType, period) {
-    const key = `snapshot_${ticker.toUpperCase()}_${formType}_${period}`.replace(/[^a-zA-Z0-9_]/g, '_');
+    const cleanTicker = (ticker || 'PAGE').toUpperCase();
+    const cleanPeriod = (period || 'latest').replace(/[^a-zA-Z0-9_]/g, '_');
+    const key = `snapshot_${cleanTicker}_${formType || 'Doc'}_${cleanPeriod}`.replace(/[^a-zA-Z0-9_]/g, '_');
     const data = await this.get(key);
     return data[key] || null;
   }
 
-  async saveFilingSnapshot(ticker, formType, period, snapshotData) {
-    const key = `snapshot_${ticker.toUpperCase()}_${formType}_${period}`.replace(/[^a-zA-Z0-9_]/g, '_');
-    const indexKey = `snapshots_index_${ticker.toUpperCase()}`;
+  async saveFilingSnapshot(scopeKey, formType, period, snapshotData) {
+    const cleanScope = (scopeKey || 'SITE_PAGE').replace(/[^a-zA-Z0-9_]/g, '_');
+    const nowIso = new Date().toISOString();
+    const periodLabel = period || new Date().toLocaleString();
+    const cleanPeriod = (period || 'snapshot_' + Date.now()).replace(/[^a-zA-Z0-9_]/g, '_');
+    const key = `snapshot_${cleanScope}_${cleanPeriod}`;
+    const indexKey = `snapshots_index_${cleanScope}`;
     
     // Save the snapshot payload
     await this.set({
       [key]: {
         ...snapshotData,
-        ticker: ticker.toUpperCase(),
-        formType,
-        period,
-        savedAt: new Date().toISOString(),
+        scopeKey: cleanScope,
+        formType: formType || 'Document',
+        period: periodLabel,
+        savedAt: nowIso,
+        url: typeof window !== 'undefined' ? window.location.href : '',
+        hostname: typeof window !== 'undefined' ? window.location.hostname : '',
       },
     });
 
-    // Update the index of snapshots for this ticker
+    // Update the index of snapshots for this specific website/scope ONLY
     const idxData = await this.get(indexKey);
     const list = idxData[indexKey] || [];
-    const exists = list.find((item) => item.formType === formType && item.period === period);
+    const exists = list.find((item) => item.key === key);
     if (!exists) {
-      list.unshift({ key, formType, period, savedAt: new Date().toISOString() });
+      list.unshift({ key, formType: formType || 'Document', period: periodLabel, savedAt: nowIso, scopeKey: cleanScope });
       await this.set({ [indexKey]: list });
     }
+    return { key, period: periodLabel };
   }
 
-  async getFilingHistory(ticker) {
-    const indexKey = `snapshots_index_${ticker.toUpperCase()}`;
+  async getFilingHistory(scopeKey) {
+    const cleanScope = (scopeKey || 'SITE_PAGE').replace(/[^a-zA-Z0-9_]/g, '_');
+    const indexKey = `snapshots_index_${cleanScope}`;
     const idxData = await this.get(indexKey);
     return idxData[indexKey] || [];
+  }
+
+  async clearFilingHistory(scopeKey) {
+    const cleanScope = (scopeKey || 'SITE_PAGE').replace(/[^a-zA-Z0-9_]/g, '_');
+    const indexKey = `snapshots_index_${cleanScope}`;
+    const idxData = await this.get(indexKey);
+    const list = idxData[indexKey] || [];
+    const keysToRemove = [indexKey, ...list.map((item) => item.key)];
+    if (typeof chrome !== 'undefined' && chrome.storage && chrome.storage.local) {
+      await chrome.storage.local.remove(keysToRemove);
+    }
+    return true;
   }
 
   // --- Notebook ---
   async getNotebookEntries(tickerFilter = null) {
     const data = await this.get('notebook_entries');
-    const entries = data.notebook_entries || [];
+    let entries = Array.isArray(data.notebook_entries) ? data.notebook_entries : [];
+
+    // Auto-repair any entries that have missing or non-string IDs
+    let repaired = false;
+    entries = entries.map((e, idx) => {
+      if (!e || typeof e !== 'object') return null;
+      if (!e.id || typeof e.id !== 'string') {
+        repaired = true;
+        return {
+          ...e,
+          id: 'note_' + Date.now() + '_' + idx + '_' + Math.random().toString(36).substr(2, 6),
+        };
+      }
+      return e;
+    }).filter(Boolean);
+
+    if (repaired) {
+      await this.set({ notebook_entries: entries });
+    }
+
     if (!tickerFilter) return entries;
     return entries.filter((e) => (e.ticker || '').toUpperCase() === tickerFilter.toUpperCase());
   }
 
-  async saveNotebookEntry(entry) {
+  async saveNotebookEntry(entry = {}) {
     const data = await this.get('notebook_entries');
-    const entries = data.notebook_entries || [];
-    const newEntry = {
-      id: 'note_' + Date.now() + '_' + Math.random().toString(36).substr(2, 6),
-      ticker: (entry.ticker || 'GENERIC').toUpperCase(),
-      company: entry.company || '',
-      note: entry.note || '',
-      quote: entry.quote || '',
-      sourceUrl: entry.sourceUrl || '',
-      sourceTitle: entry.sourceTitle || '',
-      filingPeriod: entry.filingPeriod || '',
-      tags: entry.tags || [],
+    let entries = Array.isArray(data.notebook_entries) ? [...data.notebook_entries] : [];
+
+    // Guarantee a valid, unique string ID
+    const entryId = (entry.id && typeof entry.id === 'string' && entry.id.trim())
+      ? entry.id.trim()
+      : ('note_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9));
+
+    const finalEntry = {
+      title: 'Research Note',
+      category: 'General',
+      ticker: 'PAGE',
+      company: '',
+      note: '',
+      quote: '',
+      sourceUrl: '',
+      sourceTitle: '',
+      filingPeriod: '',
+      tags: [],
       createdAt: new Date().toISOString(),
       ...entry,
+      id: entryId, // MUST come after ...entry so it cannot be overwritten by undefined!
     };
-    entries.unshift(newEntry);
+
+    finalEntry.ticker = (finalEntry.ticker || 'PAGE').toUpperCase();
+
+    // Check if an existing entry actually has this non-empty ID
+    const existingIndex = entries.findIndex((e) => e && e.id && e.id === entryId);
+    if (existingIndex >= 0) {
+      entries[existingIndex] = {
+        ...entries[existingIndex],
+        ...finalEntry,
+        updatedAt: new Date().toISOString(),
+      };
+    } else {
+      entries.unshift(finalEntry);
+    }
+
     await this.set({ notebook_entries: entries });
-    return newEntry;
+    return finalEntry;
+  }
+
+  async updateNotebookEntry(entryId, updatedFields) {
+    if (!entryId) return null;
+    const data = await this.get('notebook_entries');
+    const entries = Array.isArray(data.notebook_entries) ? [...data.notebook_entries] : [];
+    const index = entries.findIndex(e => e && e.id && e.id === entryId);
+    if (index >= 0) {
+      entries[index] = { ...entries[index], ...updatedFields, updatedAt: new Date().toISOString() };
+      await this.set({ notebook_entries: entries });
+      return entries[index];
+    }
+    return null;
   }
 
   async deleteNotebookEntry(entryId) {
+    if (!entryId) return [];
     const data = await this.get('notebook_entries');
-    const entries = (data.notebook_entries || []).filter((e) => e.id !== entryId);
+    const entries = (Array.isArray(data.notebook_entries) ? data.notebook_entries : []).filter((e) => e && e.id && e.id !== entryId);
     await this.set({ notebook_entries: entries });
     return entries;
   }
@@ -187,11 +386,16 @@ class StorageService {
     return data.watchlist_items || [];
   }
 
+  async saveWatchlist(list) {
+    await this.set({ watchlist_items: list || [] });
+    return list;
+  }
+
   async addToWatchlist(item) {
     const list = await this.getWatchlist();
     const upper = (item.ticker || '').toUpperCase();
     if (!upper) return list;
-    if (list.some((i) => i.ticker.toUpperCase() === upper)) return list;
+    if (list.some((i) => (typeof i === 'string' ? i : i.ticker).toUpperCase() === upper)) return list;
     
     const newItem = {
       ticker: upper,
@@ -199,7 +403,11 @@ class StorageService {
       sector: item.sector || 'General',
       exchange: item.exchange || 'US',
       addedAt: new Date().toISOString(),
-      lastDigest: item.lastDigest || 'Tracked. Click "Check Now" for latest digest.',
+      lastDigest: {
+        tag: 'Quiet',
+        summary: item.lastDigest || 'Tracked. Click "Check Now" for latest digest.',
+        date: 'Today',
+      },
       lastChecked: 'Just now',
     };
     list.unshift(newItem);

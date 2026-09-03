@@ -9,8 +9,9 @@ document.addEventListener('DOMContentLoaded', async () => {
 
   // Form Elements
   const providerSelect = document.getElementById('ai-provider-select');
+  const modelSelect = document.getElementById('model-select');
+  const modelCustomInput = document.getElementById('model-name-custom-input');
   const apiKeyInput = document.getElementById('api-key-input');
-  const modelNameInput = document.getElementById('model-name-input');
   const groupCustomEndpoint = document.getElementById('group-custom-endpoint');
   const customEndpointInput = document.getElementById('custom-endpoint-input');
   const tempSlider = document.getElementById('temp-slider');
@@ -22,6 +23,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   const licenseMsg = document.getElementById('license-msg');
 
   const chkBgWatchlist = document.getElementById('chk-background-watchlist');
+  const selectWatchlistSchedule = document.getElementById('select-options-watchlist-schedule');
   const sidebarWidthSlider = document.getElementById('sidebar-width-slider');
   const sidebarWidthVal = document.getElementById('sidebar-width-val');
   const advHeightSlider = document.getElementById('adv-height-slider');
@@ -36,24 +38,118 @@ document.addEventListener('DOMContentLoaded', async () => {
   const btnClearSnapshots = document.getElementById('btn-clear-snapshots');
   const dataActionMsg = document.getElementById('data-action-msg');
 
-  // Load current settings
+  // Official models dictionary per provider
+  const PROVIDER_MODELS = {
+    anthropic: [
+      { id: 'claude-3-7-sonnet-20250219', label: 'Claude 3.7 Sonnet (Latest & Recommended)' },
+      { id: 'claude-3-5-sonnet-20241022', label: 'Claude 3.5 Sonnet' },
+      { id: 'claude-3-5-haiku-20241022', label: 'Claude 3.5 Haiku (Fast & Lightweight)' },
+      { id: 'claude-3-opus-20240229', label: 'Claude 3 Opus' },
+      { id: '__custom__', label: 'Custom / Enter model manually...' },
+    ],
+    openai: [
+      { id: 'gpt-4o', label: 'GPT-4o (Flagship Omni)' },
+      { id: 'gpt-4o-mini', label: 'GPT-4o Mini (Fast & Affordable)' },
+      { id: 'o3-mini', label: 'o3-mini (High-Reasoning)' },
+      { id: 'o1', label: 'o1 (Reasoning)' },
+      { id: 'gpt-4-turbo', label: 'GPT-4 Turbo' },
+      { id: '__custom__', label: 'Custom / Enter model manually...' },
+    ],
+    gemini: [
+      { id: 'gemini-2.0-flash', label: 'Gemini 2.0 Flash (Recommended)' },
+      { id: 'gemini-2.0-flash-lite', label: 'Gemini 2.0 Flash Lite (Ultra-fast)' },
+      { id: 'gemini-1.5-pro', label: 'Gemini 1.5 Pro (Deep Context)' },
+      { id: 'gemini-1.5-flash', label: 'Gemini 1.5 Flash' },
+      { id: '__custom__', label: 'Custom / Enter model manually...' },
+    ],
+    openrouter: [
+      { id: 'anthropic/claude-3.7-sonnet', label: 'Claude 3.7 Sonnet (via OpenRouter)' },
+      { id: 'openai/gpt-4o', label: 'GPT-4o (via OpenRouter)' },
+      { id: 'google/gemini-2.0-flash-001', label: 'Gemini 2.0 Flash (via OpenRouter)' },
+      { id: 'deepseek/deepseek-r1', label: 'DeepSeek R1' },
+      { id: 'meta-llama/llama-3.3-70b-instruct', label: 'Llama 3.3 70B Instruct' },
+      { id: '__custom__', label: 'Custom / Enter model manually...' },
+    ],
+    custom: [
+      { id: 'llama3', label: 'Llama 3 (Local)' },
+      { id: 'mistral', label: 'Mistral (Local)' },
+      { id: 'deepseek-r1', label: 'DeepSeek R1 (Local)' },
+      { id: 'qwen2.5', label: 'Qwen 2.5 (Local)' },
+      { id: '__custom__', label: 'Custom / Enter model manually...' },
+    ],
+  };
+
+  function populateModels(provider, selectedModel) {
+    const list = PROVIDER_MODELS[provider] || PROVIDER_MODELS.anthropic;
+    modelSelect.innerHTML = '';
+
+    list.forEach((m) => {
+      const opt = document.createElement('option');
+      opt.value = m.id;
+      opt.textContent = m.label;
+      modelSelect.appendChild(opt);
+    });
+
+    const isKnown = list.some((m) => m.id === selectedModel && m.id !== '__custom__');
+    if (selectedModel && isKnown) {
+      modelSelect.value = selectedModel;
+      modelCustomInput.style.display = 'none';
+    } else if (selectedModel && selectedModel !== list[0].id) {
+      modelSelect.value = '__custom__';
+      modelCustomInput.value = selectedModel;
+      modelCustomInput.style.display = 'block';
+    } else {
+      modelSelect.value = list[0].id;
+      modelCustomInput.style.display = 'none';
+    }
+  }
+
+  function getActiveModelName() {
+    if (modelSelect.value === '__custom__') {
+      return modelCustomInput.value.trim() || 'default-model';
+    }
+    return modelSelect.value;
+  }
+
+  const searchProviderSelect = document.getElementById('search-provider-select');
+  const searchApiKeyInput = document.getElementById('search-api-key-input');
+  const chkDesktopNotif = document.getElementById('chk-desktop-notifications');
+  const maxAutoTickersInput = document.getElementById('max-auto-tickers-input');
+  const maxAutoTickersVal = document.getElementById('max-auto-tickers-val');
+
+  // Load initial settings
   const settings = await storage.getSettings();
   const usage = await storage.getUsageInfo();
 
-  // Populate UI
-  providerSelect.value = settings.aiProvider || 'openai';
+  providerSelect.value = settings.aiProvider || 'anthropic';
   apiKeyInput.value = settings.apiKey || '';
-  modelNameInput.value = settings.modelName || 'gpt-4o-mini';
   customEndpointInput.value = settings.customEndpoint || '';
   tempSlider.value = settings.temperature !== undefined ? settings.temperature : 0.2;
   tempVal.textContent = tempSlider.value;
   sidebarWidthSlider.value = settings.sidebarWidth || 440;
   sidebarWidthVal.textContent = sidebarWidthSlider.value;
-  advHeightSlider.value = settings.deepResearchHeight || 220;
+  advHeightSlider.value = settings.deepResearchHeight || 240;
   advHeightVal.textContent = advHeightSlider.value;
   licenseInput.value = settings.licenseKey || '';
   chkBgWatchlist.checked = settings.enableBackgroundWatchlist !== false;
+  if (selectWatchlistSchedule) {
+    const sched = settings.watchlistScheduleInterval !== undefined
+      ? settings.watchlistScheduleInterval
+      : (settings.enableBackgroundWatchlist !== false ? 1440 : 0);
+    selectWatchlistSchedule.value = String(sched);
+  }
+  if (chkDesktopNotif) chkDesktopNotif.checked = !!settings.enableDesktopNotifications;
+  if (searchProviderSelect) searchProviderSelect.value = settings.searchProvider || 'brave';
+  if (searchApiKeyInput) searchApiKeyInput.value = settings.searchApiKey || '';
+  if (maxAutoTickersInput) {
+    maxAutoTickersInput.value = settings.maxAutoDigestTickers || 10;
+    maxAutoTickersVal.textContent = maxAutoTickersInput.value;
+    maxAutoTickersInput.addEventListener('input', () => {
+      maxAutoTickersVal.textContent = maxAutoTickersInput.value;
+    });
+  }
 
+  populateModels(providerSelect.value, settings.modelName);
   updateProviderFields(providerSelect.value);
   updateLicenseUI(usage);
 
@@ -61,12 +157,17 @@ document.addEventListener('DOMContentLoaded', async () => {
   providerSelect.addEventListener('change', () => {
     const val = providerSelect.value;
     updateProviderFields(val);
-    // Suggest default model
-    if (val === 'openai') modelNameInput.value = 'gpt-4o-mini';
-    else if (val === 'anthropic') modelNameInput.value = 'claude-3-5-haiku-20241022';
-    else if (val === 'gemini') modelNameInput.value = 'gemini-2.0-flash';
-    else if (val === 'openrouter') modelNameInput.value = 'meta-llama/llama-3.3-70b-instruct';
-    else if (val === 'custom') modelNameInput.value = 'llama3';
+    populateModels(val);
+  });
+
+  // Model change listener
+  modelSelect.addEventListener('change', () => {
+    if (modelSelect.value === '__custom__') {
+      modelCustomInput.style.display = 'block';
+      modelCustomInput.focus();
+    } else {
+      modelCustomInput.style.display = 'none';
+    }
   });
 
   tempSlider.addEventListener('input', () => {
@@ -138,10 +239,11 @@ document.addEventListener('DOMContentLoaded', async () => {
     btnTest.disabled = true;
 
     // Temporarily save to test with current form values
+    const modelToTest = getActiveModelName();
     await storage.saveSettings({
       aiProvider: providerSelect.value,
       apiKey: apiKeyInput.value.trim(),
-      modelName: modelNameInput.value.trim(),
+      modelName: modelToTest,
       customEndpoint: customEndpointInput.value.trim(),
       temperature: parseFloat(tempSlider.value),
     });
@@ -168,17 +270,31 @@ document.addEventListener('DOMContentLoaded', async () => {
   // Save Settings
   btnSave.addEventListener('click', async () => {
     btnSave.disabled = true;
+    const finalModel = getActiveModelName();
     await storage.saveSettings({
       aiProvider: providerSelect.value,
       apiKey: apiKeyInput.value.trim(),
-      modelName: modelNameInput.value.trim(),
+      modelName: finalModel,
       customEndpoint: customEndpointInput.value.trim(),
       temperature: parseFloat(tempSlider.value),
       licenseKey: licenseInput.value.trim(),
-      enableBackgroundWatchlist: chkBgWatchlist.checked,
+      enableBackgroundWatchlist: chkBgWatchlist.checked && (selectWatchlistSchedule ? parseInt(selectWatchlistSchedule.value, 10) > 0 : true),
+      watchlistScheduleInterval: selectWatchlistSchedule ? parseInt(selectWatchlistSchedule.value, 10) : 1440,
+      watchlistRefreshHours: selectWatchlistSchedule && parseInt(selectWatchlistSchedule.value, 10) > 0 ? parseInt(selectWatchlistSchedule.value, 10) / 60 : 0,
+      enableDesktopNotifications: chkDesktopNotif ? chkDesktopNotif.checked : false,
+      searchProvider: searchProviderSelect ? searchProviderSelect.value : 'brave',
+      searchApiKey: searchApiKeyInput ? searchApiKeyInput.value.trim() : '',
+      maxAutoDigestTickers: maxAutoTickersInput ? parseInt(maxAutoTickersInput.value, 10) : 10,
       sidebarWidth: parseInt(sidebarWidthSlider.value, 10),
       deepResearchHeight: parseInt(advHeightSlider.value, 10),
     });
+
+    if (selectWatchlistSchedule && typeof chrome !== 'undefined' && chrome.runtime && chrome.runtime.sendMessage) {
+      chrome.runtime.sendMessage({
+        action: 'UPDATE_WATCHLIST_ALARM',
+        intervalMinutes: parseInt(selectWatchlistSchedule.value, 10),
+      }).catch(() => {});
+    }
 
     saveFeedback.textContent = '✓ Settings saved successfully.';
     setTimeout(() => {
