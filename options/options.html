@@ -1,0 +1,148 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Prospectus — Settings & API Keys</title>
+  <link rel="stylesheet" href="options.css">
+</head>
+<body>
+  <div class="settings-container">
+    <!-- Top Header -->
+    <header class="settings-header">
+      <div class="brand-title">
+        <svg class="brand-svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#cc785c" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path>
+          <polyline points="14 2 14 8 20 8"></polyline>
+          <line x1="16" y1="13" x2="8" y2="13"></line>
+          <line x1="16" y1="17" x2="8" y2="17"></line>
+          <polyline points="10 9 9 9 8 9"></polyline>
+        </svg>
+        <h1>Prospectus</h1>
+        <span class="brand-tag">settings & configuration</span>
+      </div>
+      <p class="header-desc">
+        Configure your BYOK AI provider, enter your license key, and customize research automation. All data stays local in your browser.
+      </p>
+    </header>
+
+    <!-- License Activation Card -->
+    <section class="settings-card">
+      <div class="card-header-row">
+        <div>
+          <h2>License & Activation</h2>
+          <p class="section-subtext">Enter your purchase license key provided with your download.</p>
+        </div>
+        <div id="license-badge" class="badge-status">License Required</div>
+      </div>
+
+      <div class="form-group">
+        <label for="license-key-input">License Key</label>
+        <div class="input-with-action">
+          <input type="text" id="license-key-input" placeholder="e.g. PROSP-XXXX-XXXX-XXXX or Gumroad Key" class="text-input" />
+          <button id="btn-activate-license" class="btn-primary">Activate</button>
+        </div>
+        <span id="license-msg" class="field-hint"></span>
+      </div>
+    </section>
+
+    <!-- BYOK AI Provider Settings -->
+    <section class="settings-card">
+      <h2>AI Model Provider (BYOK)</h2>
+      <p class="section-subtext">Your API key is stored securely in local browser storage and calls LLMs directly from your client.</p>
+
+      <div class="form-group">
+        <label for="ai-provider-select">Provider</label>
+        <select id="ai-provider-select" class="text-input">
+          <option value="openai">OpenAI (GPT-4o, GPT-4o-mini)</option>
+          <option value="anthropic">Anthropic Claude (Claude 3.5 Sonnet / Haiku)</option>
+          <option value="gemini">Google Gemini (Gemini 2.0 Flash, 1.5 Pro)</option>
+          <option value="openrouter">OpenRouter (Multi-model)</option>
+          <option value="custom">Custom / Local Endpoint (OpenAI-compatible / Ollama)</option>
+        </select>
+      </div>
+
+      <div class="form-group">
+        <label for="api-key-input">API Key</label>
+        <input type="password" id="api-key-input" placeholder="Enter your provider API key..." class="text-input" />
+        <span class="field-hint">Keys are never sent to our servers. Direct browser-to-provider only.</span>
+      </div>
+
+      <div class="form-group" id="group-model-name">
+        <label for="model-name-input">Model Name</label>
+        <input type="text" id="model-name-input" value="gpt-4o-mini" class="text-input" />
+      </div>
+
+      <div class="form-group" id="group-custom-endpoint" style="display: none;">
+        <label for="custom-endpoint-input">Custom Base URL</label>
+        <input type="text" id="custom-endpoint-input" placeholder="http://localhost:11434/v1/chat/completions" class="text-input" />
+      </div>
+
+      <div class="form-group">
+        <label for="temp-slider">Temperature: <span id="temp-val">0.2</span></label>
+        <input type="range" id="temp-slider" min="0" max="1" step="0.05" value="0.2" class="range-slider" />
+        <span class="field-hint">Lower temperature provides more factual, conservative financial extractions.</span>
+      </div>
+
+      <div style="display: flex; gap: 10px; margin-top: 10px;">
+        <button id="btn-test-connection" class="btn-secondary">Test Connection</button>
+        <span id="test-status-msg" style="align-self: center; font-size: 13px;"></span>
+      </div>
+    </section>
+
+    <!-- Layout & Dimensions -->
+    <section class="settings-card">
+      <h2>Layout & Dimensions</h2>
+      <p class="section-subtext">Customize the default width of the Prospectus sidebar and the vertical length of the Deep Research Q&A section. You can also resize interactively on any page by dragging the panel handles.</p>
+
+      <div class="form-group">
+        <label for="sidebar-width-slider">Sidebar Width: <span id="sidebar-width-val">440</span>px</label>
+        <input type="range" id="sidebar-width-slider" min="340" max="800" step="10" value="440" class="range-slider" />
+        <span class="field-hint">Range: 340px (Compact) to 800px (Full-width analysis).</span>
+      </div>
+
+      <div class="form-group">
+        <label for="adv-height-slider">Deep Research Section Max Height: <span id="adv-height-val">220</span>px</label>
+        <input type="range" id="adv-height-slider" min="140" max="500" step="10" value="220" class="range-slider" />
+        <span class="field-hint">Range: 140px (Compact dock) to 500px (Expanded reading).</span>
+      </div>
+    </section>
+
+    <!-- General Automation -->
+    <section class="settings-card">
+      <h2>Research & Automation</h2>
+      <p class="section-subtext">Configure background digests and on-demand analysis behavior.</p>
+
+      <div class="checkbox-row">
+        <input type="checkbox" id="chk-background-watchlist" checked />
+        <label for="chk-background-watchlist">
+          <strong>Daily Watchlist background digest</strong>
+          <span>Quietly refresh one-line neutral summaries once per 24 hours.</span>
+        </label>
+      </div>
+    </section>
+
+    <!-- Data Management -->
+    <section class="settings-card">
+      <h2>Data Management</h2>
+      <p class="section-subtext">Export or manage locally cached snapshots and research notes.</p>
+      <div style="display: flex; gap: 12px; flex-wrap: wrap;">
+        <button id="btn-export-all-data" class="btn-secondary">Export All Notes (JSON)</button>
+        <button id="btn-clear-snapshots" class="btn-secondary" style="color: #c64545;">Clear Filing Snapshots</button>
+      </div>
+      <span id="data-action-msg" class="field-hint" style="margin-top: 8px;"></span>
+    </section>
+
+    <!-- Save Bar -->
+    <div class="save-bar">
+      <button id="btn-save-settings" class="btn-primary" style="padding: 12px 28px; font-size: 15px;">Save Settings</button>
+      <span id="save-feedback" style="font-size: 13.5px; color: #23654b; font-weight: 500;"></span>
+    </div>
+  </div>
+
+  <script src="../services/storage-service.js"></script>
+  <script src="../services/license-service.js"></script>
+  <script src="../services/ai-service.js"></script>
+  <script src="options.js"></script>
+</body>
+</html>

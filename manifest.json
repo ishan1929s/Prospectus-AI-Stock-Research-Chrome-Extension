@@ -1,0 +1,91 @@
+{
+  "manifest_version": 3,
+  "name": "Prospectus — Stock & SEC Research Copilot",
+  "version": "1.0.0",
+  "description": "Organize, summarize, and diff SEC filings and stock research without buy/sell signals. BYOK AI.",
+  "icons": {
+    "16": "icons/icon-16.png",
+    "48": "icons/icon-48.png",
+    "128": "icons/icon-128.png"
+  },
+  "action": {
+    "default_popup": "popup/popup.html",
+    "default_title": "Prospectus",
+    "default_icon": {
+      "16": "icons/icon-16.png",
+      "48": "icons/icon-48.png",
+      "128": "icons/icon-128.png"
+    }
+  },
+  "background": {
+    "service_worker": "background/service-worker.js"
+  },
+  "options_ui": {
+    "page": "options/options.html",
+    "open_in_tab": true
+  },
+  "permissions": [
+    "storage",
+    "activeTab",
+    "contextMenus",
+    "alarms",
+    "scripting",
+    "tabs"
+  ],
+  "host_permissions": [
+    "https://*.sec.gov/*",
+    "https://*.finance.yahoo.com/*",
+    "https://*.seekingalpha.com/*",
+    "https://*.tradingview.com/*",
+    "https://*.marketwatch.com/*",
+    "https://*.finviz.com/*",
+    "https://api.openai.com/*",
+    "https://api.anthropic.com/*",
+    "https://generativelanguage.googleapis.com/*",
+    "https://openrouter.ai/*",
+    "https://api.gumroad.com/*"
+  ],
+  "content_scripts": [
+    {
+      "matches": [
+        "https://*.sec.gov/*",
+        "https://*.finance.yahoo.com/*",
+        "https://*.seekingalpha.com/*",
+        "https://*.tradingview.com/*",
+        "https://*.marketwatch.com/*",
+        "https://*.finviz.com/*"
+      ],
+      "js": [
+        "services/storage-service.js",
+        "services/license-service.js",
+        "services/ai-service.js",
+        "content/extractors.js",
+        "content/diff-engine.js",
+        "content/content.js"
+      ],
+      "run_at": "document_idle"
+    }
+  ],
+  "web_accessible_resources": [
+    {
+      "resources": [
+        "content/panel.css",
+        "icons/icon-16.png",
+        "icons/icon-48.png",
+        "icons/icon-128.png"
+      ],
+      "matches": [
+        "<all_urls>"
+      ]
+    }
+  ],
+  "commands": {
+    "toggle-panel": {
+      "suggested_key": {
+        "default": "Alt+P",
+        "mac": "Alt+P"
+      },
+      "description": "Toggle Prospectus Research Panel"
+    }
+  }
+}

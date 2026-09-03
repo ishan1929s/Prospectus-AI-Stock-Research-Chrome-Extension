@@ -1,0 +1,1023 @@
+/* ==========================================================================
+   Prospectus - Editorial Claude-Inspired Shadow DOM Stylesheet
+   Canvas: #faf9f5 | Card: #efe9de | Coral: #cc785c | Ink: #141413
+   ========================================================================== */
+
+@import url('https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,400;0,500;0,600;1,400&family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap');
+
+:host {
+  all: initial;
+  position: fixed;
+  top: 0;
+  right: 0;
+  z-index: 2147483647;
+  font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  color: #3d3d3a;
+  box-sizing: border-box;
+}
+
+*, *::before, *::after {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+/* --- Floating Toggle Pill (When panel is closed or minified) --- */
+.prospectus-dock-toggle {
+  position: fixed;
+  right: 0;
+  top: 45%;
+  transform: translateY(-50%);
+  background: #faf9f5;
+  color: #141413;
+  border: 1px solid #e6dfd8;
+  border-right: none;
+  padding: 10px 14px 10px 12px;
+  border-radius: 9999px 0 0 9999px;
+  box-shadow: -2px 4px 16px rgba(20, 20, 19, 0.08);
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  font-weight: 500;
+  transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+  user-select: none;
+  z-index: 2147483646;
+}
+
+.prospectus-dock-toggle:hover {
+  background: #efe9de;
+  padding-left: 16px;
+}
+
+.prospectus-dock-toggle .icon-badge {
+  width: 20px;
+  height: 20px;
+  background: #cc785c;
+  color: #ffffff;
+  border-radius: 4px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 11px;
+  font-weight: 600;
+}
+
+/* --- Main Docked Sidebar --- */
+.prospectus-panel {
+  position: fixed;
+  top: 0;
+  right: 0;
+  width: var(--prospectus-sidebar-width, 440px);
+  min-width: 320px;
+  max-width: 88vw;
+  height: 100vh;
+  background: #faf9f5;
+  border-left: 1px solid #e6dfd8;
+  box-shadow: -6px 0 28px rgba(20, 20, 19, 0.09);
+  display: flex;
+  flex-direction: column;
+  transform: translateX(0);
+  transition: transform 0.28s cubic-bezier(0.16, 1, 0.3, 1);
+  overflow: hidden;
+  z-index: 2147483647;
+}
+
+/* Sidebar Left Edge Drag-to-Resize Handle */
+.prospectus-resize-handle-left {
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  width: 7px;
+  cursor: ew-resize;
+  z-index: 100;
+  transition: background 0.15s;
+}
+
+.prospectus-resize-handle-left:hover,
+.prospectus-resize-handle-left.active {
+  background: rgba(204, 120, 92, 0.4);
+}
+
+.prospectus-panel.closed {
+  transform: translateX(105%);
+}
+
+/* --- Top Browser & Brand Header --- */
+.prospectus-header {
+  background: #f5f0e8;
+  border-bottom: 1px solid #e6dfd8;
+  padding: 14px 18px 12px 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.browser-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.window-dots {
+  display: flex;
+  gap: 5px;
+}
+
+.dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #d4cfc7;
+}
+
+.url-input-mock {
+  flex: 1;
+  background: #faf9f5;
+  border: 1px solid #e6dfd8;
+  border-radius: 6px;
+  padding: 4px 10px;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 11px;
+  color: #6c6a64;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.url-dock-btn {
+  background: #faf9f5;
+  border: 1px solid #e6dfd8;
+  border-radius: 4px;
+  color: #6c6a64;
+  padding: 3px 6px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.15s;
+}
+
+.url-dock-btn:hover {
+  background: #efe9de;
+  color: #141413;
+}
+
+/* --- Non-Finance / Manual Analysis State --- */
+.non-finance-view {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  padding: 6px 0;
+}
+
+.non-finance-prompt {
+  font-size: 14.5px;
+  font-weight: 500;
+  color: #252523;
+  line-height: 1.45;
+}
+
+.btn-dark-cta {
+  background: #181715;
+  color: #faf9f5;
+  border: 1px solid #181715;
+  border-radius: 6px;
+  padding: 9px 18px;
+  font-family: 'Inter', sans-serif;
+  font-size: 13.5px;
+  font-weight: 500;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  align-self: flex-start;
+  transition: background 0.15s;
+}
+
+.btn-dark-cta:hover {
+  background: #2b2926;
+}
+
+.btn-dark-cta:disabled {
+  background: #6c6a64;
+  cursor: not-allowed;
+}
+
+.non-finance-notice {
+  font-size: 13px;
+  line-height: 1.6;
+  color: #6c6a64;
+  border-top: 1px solid #e6dfd8;
+  padding-top: 18px;
+  margin-top: 8px;
+}
+
+.brand-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.brand-title {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+}
+
+.brand-title strong {
+  font-family: 'Inter', sans-serif;
+  font-size: 15px;
+  font-weight: 600;
+  color: #141413;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.brand-icon {
+  color: #cc785c;
+}
+
+.brand-tag {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 11px;
+  color: #8e8b82;
+}
+
+.header-controls {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.icon-btn {
+  background: transparent;
+  border: none;
+  color: #6c6a64;
+  cursor: pointer;
+  padding: 5px;
+  border-radius: 6px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: background 0.15s;
+}
+
+.icon-btn:hover {
+  background: #e8e0d2;
+  color: #141413;
+}
+
+/* --- Ticker & Company Overview Row --- */
+.ticker-overview {
+  padding: 14px 18px;
+  background: #faf9f5;
+  border-bottom: 1px solid #e6dfd8;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.ticker-title-group {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+}
+
+.ticker-symbol {
+  font-family: 'Inter', sans-serif;
+  font-size: 24px;
+  font-weight: 700;
+  color: #141413;
+  letter-spacing: -0.5px;
+}
+
+.company-name {
+  font-family: 'Cormorant Garamond', 'Tiempos Headline', serif;
+  font-size: 18px;
+  font-weight: 500;
+  color: #3d3d3a;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.pill-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.pill {
+  font-family: 'Inter', sans-serif;
+  font-size: 11px;
+  font-weight: 500;
+  background: #efe9de;
+  color: #252523;
+  border: 1px solid #e6dfd8;
+  padding: 3px 9px;
+  border-radius: 9999px;
+}
+
+.pill.accent {
+  background: #fdf5f2;
+  color: #a9583e;
+  border-color: #f1d3c8;
+}
+
+/* --- Navigation Tabs --- */
+.tab-navigation {
+  display: flex;
+  background: #faf9f5;
+  border-bottom: 1px solid #e6dfd8;
+  padding: 0 14px;
+  gap: 2px;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+.tab-navigation::-webkit-scrollbar {
+  display: none;
+}
+
+.tab-btn {
+  background: transparent;
+  border: none;
+  padding: 10px 11px;
+  font-family: 'Inter', sans-serif;
+  font-size: 13px;
+  font-weight: 500;
+  color: #6c6a64;
+  cursor: pointer;
+  position: relative;
+  white-space: nowrap;
+  transition: color 0.15s;
+}
+
+.tab-btn:hover {
+  color: #141413;
+}
+
+.tab-btn.active {
+  color: #141413;
+  font-weight: 600;
+}
+
+.tab-btn.active::after {
+  content: '';
+  position: absolute;
+  bottom: -1px;
+  left: 0;
+  right: 0;
+  height: 2px;
+  background: #cc785c;
+}
+
+/* --- Main Scrollable Content Container --- */
+.tab-content-wrapper {
+  flex: 1;
+  overflow-y: auto;
+  overflow-x: hidden;
+  padding: 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  background: #faf9f5;
+  word-break: break-word;
+  overflow-wrap: break-word;
+}
+
+/* --- Typography Helpers --- */
+.section-headline {
+  font-family: 'Cormorant Garamond', 'Tiempos Headline', serif;
+  font-size: 22px;
+  font-weight: 500;
+  color: #141413;
+  letter-spacing: -0.3px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+/* --- Coverage Tone Meter Card --- */
+.coverage-tone-card {
+  background: #faf9f5;
+  border: 1px solid #e6dfd8;
+  border-radius: 8px;
+  padding: 14px 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.meter-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  font-size: 13px;
+}
+
+.meter-title {
+  color: #6c6a64;
+  font-weight: 500;
+}
+
+.meter-label {
+  color: #141413;
+  font-weight: 600;
+  font-size: 13px;
+}
+
+.meter-track-container {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.meter-bar {
+  position: relative;
+  width: 100%;
+  height: 7px;
+  border-radius: 4px;
+  background: linear-gradient(to right, #cf6d53 0%, #e09774 25%, #c8c4b7 50%, #87b99c 75%, #5db872 100%);
+}
+
+.meter-tick {
+  position: absolute;
+  top: -4px;
+  bottom: -4px;
+  width: 3px;
+  background: #141413;
+  border-radius: 2px;
+  transform: translateX(-50%);
+  transition: left 0.4s cubic-bezier(0.16, 1, 0.3, 1);
+  box-shadow: 0 0 2px rgba(255, 255, 255, 0.8);
+}
+
+.meter-labels {
+  display: flex;
+  justify-content: space-between;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 10px;
+  color: #8e8b82;
+}
+
+.meter-disclaimer {
+  font-size: 12px;
+  line-height: 1.45;
+  color: #6c6a64;
+}
+
+/* --- Tone Pill Tag --- */
+.tone-highlight-pill {
+  display: inline-flex;
+  align-items: center;
+  align-self: flex-start;
+  background: #e2f0ea;
+  color: #23654b;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 11px;
+  font-weight: 500;
+  padding: 4px 10px;
+  border-radius: 6px;
+  border: 1px solid #c9e3d7;
+}
+
+/* --- Bullet Takeaways --- */
+.summary-bullets {
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.summary-bullets li {
+  font-size: 14px;
+  line-height: 1.55;
+  color: #252523;
+  position: relative;
+  padding-left: 18px;
+  word-break: break-word;
+  overflow-wrap: break-word;
+}
+
+.summary-bullets li::before {
+  content: '•';
+  position: absolute;
+  left: 4px;
+  color: #141413;
+  font-weight: bold;
+}
+
+.editorial-divider {
+  height: 1px;
+  background: #e6dfd8;
+  width: 100%;
+  margin: 6px 0;
+}
+
+.compliance-note {
+  font-size: 12.5px;
+  line-height: 1.5;
+  color: #6c6a64;
+}
+
+.compliance-note strong {
+  color: #141413;
+}
+
+/* --- What Changed (Diff View) Styles --- */
+.diff-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.select-input {
+  background: #faf9f5;
+  border: 1px solid #e6dfd8;
+  border-radius: 6px;
+  padding: 6px 10px;
+  font-family: 'Inter', sans-serif;
+  font-size: 12px;
+  color: #141413;
+  outline: none;
+}
+
+.diff-stats-badge {
+  display: flex;
+  gap: 6px;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 11px;
+}
+
+.stat-tag {
+  padding: 2px 6px;
+  border-radius: 4px;
+}
+.stat-tag.add { background: #e2f0ea; color: #23654b; }
+.stat-tag.del { background: #fbe8e4; color: #a9583e; }
+
+.diff-container {
+  background: #efe9de;
+  border: 1px solid #e6dfd8;
+  border-radius: 8px;
+  padding: 14px;
+  font-family: 'Inter', sans-serif;
+  font-size: 13px;
+  line-height: 1.65;
+  color: #3d3d3a;
+  max-height: 340px;
+  overflow-y: auto;
+}
+
+ins.diff-add {
+  background: #d4ebd9;
+  color: #18522c;
+  text-decoration: none;
+  border-radius: 3px;
+  padding: 1px 4px;
+}
+
+del.diff-del {
+  background: #fae1dc;
+  color: #a9583e;
+  text-decoration: line-through;
+  border-radius: 3px;
+  padding: 1px 4px;
+}
+
+.diff-tag {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 9px;
+  font-weight: bold;
+  padding: 1px 3px;
+  border-radius: 2px;
+  margin-right: 2px;
+}
+ins .diff-tag { background: #5db872; color: #ffffff; }
+del .diff-tag { background: #cc785c; color: #ffffff; }
+
+/* --- Explain Terms View --- */
+.explain-input-box {
+  display: flex;
+  gap: 8px;
+}
+
+.text-input-field {
+  flex: 1;
+  background: #faf9f5;
+  border: 1px solid #e6dfd8;
+  border-radius: 6px;
+  padding: 8px 12px;
+  font-size: 13px;
+  color: #141413;
+  outline: none;
+  transition: border-color 0.15s;
+}
+
+.text-input-field:focus {
+  border-color: #cc785c;
+  box-shadow: 0 0 0 2px rgba(204, 120, 92, 0.15);
+}
+
+.coral-btn {
+  background: #cc785c;
+  color: #ffffff;
+  border: none;
+  border-radius: 6px;
+  padding: 8px 14px;
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  transition: background 0.15s;
+}
+
+.coral-btn:hover {
+  background: #a9583e;
+}
+
+.coral-btn:disabled {
+  background: #e6dfd8;
+  color: #8e8b82;
+  cursor: not-allowed;
+}
+
+.card-box {
+  background: #efe9de;
+  border: 1px solid #e6dfd8;
+  border-radius: 8px;
+  padding: 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.card-box h4 {
+  font-size: 14px;
+  font-weight: 600;
+  color: #141413;
+}
+
+.card-box p {
+  font-size: 13.5px;
+  line-height: 1.55;
+  color: #252523;
+}
+
+/* --- Notebook View --- */
+.notebook-filter-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.note-item-card {
+  background: #faf9f5;
+  border: 1px solid #e6dfd8;
+  border-radius: 8px;
+  padding: 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  transition: box-shadow 0.15s;
+}
+
+.note-item-card:hover {
+  box-shadow: 0 2px 10px rgba(20, 20, 19, 0.05);
+}
+
+.note-quote {
+  font-style: italic;
+  font-family: 'Cormorant Garamond', Georgia, serif;
+  font-size: 15px;
+  color: #141413;
+  border-left: 2px solid #cc785c;
+  padding-left: 10px;
+}
+
+.cross-ref-badge {
+  align-self: flex-start;
+  background: #e8a55a22;
+  color: #a46419;
+  font-size: 11px;
+  font-weight: 500;
+  padding: 2px 8px;
+  border-radius: 4px;
+  border: 1px solid #e8a55a44;
+}
+
+/* --- Watchlist View --- */
+.watchlist-card {
+  background: #faf9f5;
+  border: 1px solid #e6dfd8;
+  border-radius: 8px;
+  padding: 12px 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.wl-top {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+}
+
+.wl-ticker {
+  font-weight: 700;
+  font-size: 15px;
+  color: #141413;
+}
+
+.wl-digest {
+  font-size: 13px;
+  line-height: 1.45;
+  color: #3d3d3a;
+}
+
+/* --- Bottom Status Footer --- */
+.prospectus-footer {
+  background: #f5f0e8;
+  border-top: 1px solid #e6dfd8;
+  padding: 10px 18px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 11px;
+  color: #6c6a64;
+}
+
+.api-status-group {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.status-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: #5db872;
+}
+
+.status-dot.warning {
+  background: #e8a55a;
+}
+
+.license-info {
+  color: #8e8b82;
+}
+
+/* --- Floating Selection Tooltip --- */
+.prospectus-floating-tooltip {
+  position: absolute;
+  background: #faf9f5;
+  border: 1px solid #e6dfd8;
+  border-radius: 8px;
+  box-shadow: 0 4px 18px rgba(20, 20, 19, 0.14);
+  padding: 4px;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  z-index: 2147483647;
+  user-select: none;
+  animation: popIn 0.15s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+@keyframes popIn {
+  from { opacity: 0; transform: scale(0.92) translateY(4px); }
+  to { opacity: 1; transform: scale(1) translateY(0); }
+}
+
+.tooltip-action-btn {
+  background: transparent;
+  border: none;
+  padding: 5px 9px;
+  font-family: 'Inter', sans-serif;
+  font-size: 12px;
+  font-weight: 500;
+  color: #141413;
+  border-radius: 5px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  transition: background 0.15s;
+}
+
+.tooltip-action-btn:hover {
+  background: #efe9de;
+}
+
+.tooltip-action-btn.primary {
+  color: #cc785c;
+  font-weight: 600;
+}
+
+/* --- Loading Spinner & Shimmer --- */
+.loading-shimmer {
+  background: linear-gradient(90deg, #efe9de 25%, #f7f3ec 50%, #efe9de 75%);
+  background-size: 200% 100%;
+  animation: shimmer 1.5s infinite;
+  border-radius: 4px;
+  height: 16px;
+}
+
+@keyframes shimmer {
+  0% { background-position: 200% 0; }
+  100% { background-position: -200% 0; }
+}
+
+/* --- Advanced Research Interactive Footer (Appears After Analysis) --- */
+.prospectus-advanced-footer {
+  position: relative;
+  background: #fcfaf6;
+  border-top: 1px solid #e6dfd8;
+  padding: 12px 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  box-shadow: 0 -4px 14px rgba(20, 20, 19, 0.04);
+  animation: slideUp 0.25s cubic-bezier(0.16, 1, 0.3, 1);
+  z-index: 10;
+}
+
+/* Deep Research Top Edge Drag-to-Resize Handle */
+.prospectus-resize-handle-top {
+  position: absolute;
+  top: -4px;
+  left: 0;
+  right: 0;
+  height: 8px;
+  cursor: ns-resize;
+  z-index: 50;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+}
+
+.prospectus-resize-handle-top::after {
+  content: '';
+  width: 38px;
+  height: 3px;
+  background: #d8d0c3;
+  border-radius: 2px;
+  transition: background 0.15s;
+}
+
+.prospectus-resize-handle-top:hover::after,
+.prospectus-resize-handle-top.active::after {
+  background: #cc785c;
+}
+
+@keyframes slideUp {
+  from { opacity: 0; transform: translateY(8px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+.adv-footer-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.adv-header-badge {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  color: #a9583e;
+  font-family: 'Inter', sans-serif;
+  font-size: 11.5px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
+}
+
+.adv-suggestions-container {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.adv-suggestions-label {
+  font-size: 11px;
+  font-weight: 500;
+  color: #8e8b82;
+}
+
+.adv-chips-row {
+  display: flex;
+  gap: 6px;
+  overflow-x: auto;
+  padding-bottom: 2px;
+  scrollbar-width: none;
+}
+.adv-chips-row::-webkit-scrollbar {
+  display: none;
+}
+
+.adv-chip {
+  background: #efe9de;
+  color: #252523;
+  border: 1px solid #e6dfd8;
+  padding: 4px 10px;
+  border-radius: 9999px;
+  font-family: 'Inter', sans-serif;
+  font-size: 11.5px;
+  font-weight: 500;
+  white-space: nowrap;
+  cursor: pointer;
+  transition: all 0.15s ease;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.adv-chip:hover {
+  background: #e4ddd0;
+  border-color: #cc785c;
+  color: #a9583e;
+  transform: translateY(-1px);
+}
+
+.adv-input-row {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+}
+
+.adv-input-row input {
+  flex: 1;
+  background: #ffffff;
+  border: 1px solid #e6dfd8;
+  border-radius: 6px;
+  padding: 7px 11px;
+  font-family: 'Inter', sans-serif;
+  font-size: 12.5px;
+  color: #141413;
+  outline: none;
+  transition: border-color 0.15s, box-shadow 0.15s;
+}
+
+.adv-input-row input:focus {
+  border-color: #cc785c;
+  box-shadow: 0 0 0 2px rgba(204, 120, 92, 0.12);
+}
+
+.adv-send-btn {
+  background: #181715;
+  color: #ffffff;
+  border: none;
+  border-radius: 6px;
+  padding: 7px 12px;
+  font-family: 'Inter', sans-serif;
+  font-size: 12px;
+  font-weight: 500;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  transition: background 0.15s;
+  white-space: nowrap;
+}
+
+.adv-send-btn:hover {
+  background: #33322e;
+}
+
+.adv-response-card {
+  background: #efe9de;
+  border: 1px solid #e6dfd8;
+  border-radius: 8px;
+  padding: 12px 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  max-height: var(--prospectus-adv-resp-height, 220px);
+  overflow-y: auto;
+}
+
+.adv-response-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-size: 12px;
+  font-weight: 600;
+  color: #141413;
+}
+
+.adv-response-body {
+  font-size: 13px;
+  line-height: 1.55;
+  color: #252523;
+}
+
