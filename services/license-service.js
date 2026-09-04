@@ -4,111 +4,36 @@
  * and local license state management. (No free trial).
  */
 
+const ACTIVATION_KEYS = [
+  'PRS-8F2A-4D9C-7B1E',
+  'PRS-5E3B-9A7D-2C6F'
+];
+
 class LicenseService {
   constructor(storageService) {
     this.storage = storageService || (typeof window !== 'undefined' ? window.ProspectusStorage : null);
   }
 
+  static get VALID_KEYS() {
+    return ACTIVATION_KEYS;
+  }
+
+  static isKeyValid(key) {
+    if (!key || typeof key !== 'string') return false;
+    return ACTIVATION_KEYS.includes(key.trim().toUpperCase());
+  }
+
   /**
-   * Validate a license key.
-   * Works for both direct ZIP package license keys (format: PROSP-XXXX-XXXX-XXXX or custom keys)
-   * and Gumroad API verification when product_permalink is provided.
+   * Validate an activation key.
+   * Only the authorized activation keys are accepted.
    */
-  async verifyLicenseKey(licenseKey, productPermalink = '') {
-    const key = (licenseKey || '').trim();
+  async verifyLicenseKey(licenseKey) {
+    const key = (licenseKey || '').trim().toUpperCase();
     if (!key) {
-      return { valid: false, message: 'Please enter a license key.' };
+      return { valid: false, message: 'Please enter an activation key.' };
     }
 
-    // 1. If Gumroad product permalink is provided, verify against Gumroad API
-    if (productPermalink) {
-      try {
-        let res = null;
-        if (typeof chrome !== 'undefined' && chrome.runtime && chrome.runtime.id && chrome.runtime.sendMessage) {
-          try {
-            const proxyRes = await new Promise((resolve, reject) => {
-              try {
-                chrome.runtime.sendMessage(
-                  {
-                    action: 'FETCH_PROXY',
-                    url: 'https://api.gumroad.com/v2/licenses/verify',
-                    options: {
-                      method: 'POST',
-                      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-                      body: new URLSearchParams({
-                        product_permalink: productPermalink,
-                        license_key: key,
-                      }).toString(),
-                    },
-                  },
-                  (r) => {
-                    try {
-                      if (chrome.runtime && chrome.runtime.id && chrome.runtime.lastError) {
-                        return reject(new Error(chrome.runtime.lastError.message));
-                      }
-                      resolve(r);
-                    } catch (e) {
-                      reject(new Error('Extension context invalidated'));
-                    }
-                  }
-                );
-              } catch (e) {
-                reject(new Error('Extension context invalidated'));
-              }
-            });
-            if (proxyRes && proxyRes.data) {
-              const data = proxyRes.data;
-              if (data.success && !data.purchase?.refunded && !data.purchase?.chargebacked) {
-                return {
-                  valid: true,
-                  message: 'License verified via Gumroad!',
-                  details: {
-                    email: data.purchase?.email,
-                    variants: data.purchase?.variants,
-                  },
-                };
-              } else {
-                return {
-                  valid: false,
-                  message: data.message || 'Invalid Gumroad license key.',
-                };
-              }
-            }
-          } catch (e) {}
-        }
-
-        res = await fetch('https://api.gumroad.com/v2/licenses/verify', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-          body: new URLSearchParams({
-            product_permalink: productPermalink,
-            license_key: key,
-          }),
-        });
-        const data = await res.json();
-        if (data.success && !data.purchase.refunded && !data.purchase.chargebacked) {
-          return {
-            valid: true,
-            message: 'License verified via Gumroad!',
-            details: {
-              email: data.purchase.email,
-              variants: data.purchase.variants,
-            },
-          };
-        } else {
-          return {
-            valid: false,
-            message: data.message || 'Invalid Gumroad license key.',
-          };
-        }
-      } catch (err) {
-        console.warn('Gumroad API verification failed, falling back to format check:', err);
-      }
-    }
-
-    // 2. Direct ZIP distribution key validation
-    // Format check: accept standard alphanumeric keys (min length 6 chars)
-    if (key.length >= 6) {
+    if (LicenseService.isKeyValid(key)) {
       return {
         valid: true,
         message: 'License key activated successfully!',
@@ -118,19 +43,24 @@ class LicenseService {
 
     return {
       valid: false,
-      message: 'Invalid license key format. Please enter a valid license key.',
+      message: 'Invalid activation key. Please check your key and try again.',
     };
   }
 
   /**
    * Activate the extension with a user license key
    */
-  async activate(licenseKey, productPermalink = '') {
-    const result = await this.verifyLicenseKey(licenseKey, productPermalink);
+  async activate(licenseKey) {
+    const result = await this.verifyLicenseKey(licenseKey);
     if (result.valid) {
       await this.storage.saveSettings({
-        licenseKey: licenseKey.trim(),
+        licenseKey: licenseKey.trim().toUpperCase(),
         isLicensed: true,
+      });
+    } else {
+      await this.storage.saveSettings({
+        licenseKey: '',
+        isLicensed: false,
       });
     }
     return result;
@@ -152,13 +82,13 @@ class LicenseService {
    */
   async checkCanAnalyze() {
     const usage = await this.storage.getUsageInfo();
-    if (usage.isLicensed) {
+    if (usage.isLicensed && LicenseService.isKeyValid(usage.licenseKey)) {
       return { allowed: true, isLicensed: true };
     }
     return {
       allowed: false,
       isLicensed: false,
-      message: 'License required. Please enter your license key in Settings to use Prospectus.',
+      message: 'License required. Please enter a valid activation key in Settings to use Prospectus.',
     };
   }
 }

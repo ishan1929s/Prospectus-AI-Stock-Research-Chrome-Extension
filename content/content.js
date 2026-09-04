@@ -45,11 +45,30 @@
   if (window.__prospectus_injected) return;
   window.__prospectus_injected = true;
 
-  // Suppress harmless extension reload / invalidation errors in existing tabs
+  // Suppress harmless extension reload, API, and connection errors from throwing to Chrome
   if (typeof window !== 'undefined') {
     window.addEventListener('unhandledrejection', (event) => {
       const msg = (event && event.reason && (event.reason.message || String(event.reason))) || '';
-      if (msg.includes('Extension context invalidated') || msg.includes('message port closed')) {
+      if (
+        msg.includes('Extension context invalidated') ||
+        msg.includes('message port closed') ||
+        msg.includes('Receiving end does not exist') ||
+        msg.includes('API error') ||
+        msg.includes('API key') ||
+        msg.includes('fetch') ||
+        msg.includes('Failed to fetch')
+      ) {
+        event.preventDefault();
+      }
+    });
+
+    window.addEventListener('error', (event) => {
+      const msg = (event && event.message) || '';
+      if (
+        msg.includes('Extension context invalidated') ||
+        msg.includes('message port closed') ||
+        msg.includes('Receiving end does not exist')
+      ) {
         event.preventDefault();
       }
     });
@@ -193,7 +212,7 @@
                 </div>
                 <div class="header-controls">
                   <button class="btn-header-watchlist" id="btn-header-watchlist" style="display: none;" title="Toggle Watchlist">
-                    <span>✓ Tracked</span>
+                    <span>+ Watchlist</span>
                   </button>
                   <button class="icon-btn" id="btn-open-settings" title="Settings" aria-label="Settings">${ICONS.settings}</button>
                   <button class="icon-btn" id="btn-close-sidebar" title="Close Panel" aria-label="Close">${ICONS.close}</button>
@@ -501,30 +520,23 @@
         });
       }
 
-      const openSettings = () => {
-        try {
-          if (typeof chrome !== 'undefined' && chrome.runtime && chrome.runtime.id && chrome.runtime.sendMessage) {
-            chrome.runtime.sendMessage({ action: 'OPEN_OPTIONS' }, () => {
-              if (chrome.runtime && chrome.runtime.lastError) {
-                try {
-                  const optionsUrl = chrome.runtime.getURL('options/options.html');
-                  window.open(optionsUrl, '_blank');
-                } catch (e) {}
-              }
-            });
-            return;
-          }
-        } catch (e) {}
-        try {
-          if (typeof chrome !== 'undefined' && chrome.runtime && chrome.runtime.id && chrome.runtime.getURL) {
-            window.open(chrome.runtime.getURL('options/options.html'), '_blank');
-          }
-        } catch (e) {}
-      };
+      const openSettings = () => this.openSettings();
 
-      settingsBtn.addEventListener('click', openSettings);
-      footerApiGroup.addEventListener('click', openSettings);
-      footerLicenseStatus.addEventListener('click', openSettings);
+      if (settingsBtn) settingsBtn.addEventListener('click', openSettings);
+      if (footerApiGroup) footerApiGroup.addEventListener('click', openSettings);
+      if (footerLicenseStatus) footerLicenseStatus.addEventListener('click', openSettings);
+
+      window.addEventListener('focus', () => {
+        this.updateFooterStatus();
+      });
+
+      if (typeof chrome !== 'undefined' && chrome.storage && chrome.storage.onChanged) {
+        chrome.storage.onChanged.addListener((changes, area) => {
+          if (area === 'local' && (changes.settings || changes.license)) {
+            this.updateFooterStatus();
+          }
+        });
+      }
 
       tabBtns.forEach((btn) => {
         btn.addEventListener('click', () => {
@@ -572,6 +584,7 @@
       sidebar.classList.remove('closed');
       dockBtn.style.display = 'none';
       this.isOpen = true;
+      this.updateFooterStatus();
       this.updateHeaderWatchlistButton();
     }
 
@@ -680,7 +693,9 @@
 
         if (!dot || !apiText || !licText) return;
 
-        if (!settings.apiKey && settings.aiProvider !== 'custom') {
+        const hasApiKey = !(!settings.apiKey && settings.aiProvider !== 'custom');
+
+        if (!hasApiKey) {
           dot.className = 'status-dot warning';
           apiText.textContent = 'API Key needed (Settings)';
         } else {
@@ -689,10 +704,17 @@
         }
 
         if (usage.isLicensed) {
-          licText.textContent = 'Unlimited · one-time purchase';
+          if (hasApiKey) {
+            licText.textContent = 'Prospectus can make mistake';
+            licText.title = 'AI analyses can contain inaccuracies. Verify key filing data.';
+          } else {
+            licText.textContent = 'Unlimited · one-time purchase';
+            licText.title = 'License Active';
+          }
           licText.style.color = '#8e8b82';
         } else {
           licText.textContent = 'License required';
+          licText.title = 'Click to activate license';
           licText.style.color = '#a9583e';
         }
       } catch (e) {}
@@ -792,15 +814,7 @@
           if (retryBtn) retryBtn.addEventListener('click', () => this.runSummaryAnalysis());
 
           const settingsBtn = this.shadowRoot.getElementById('btn-error-settings');
-          if (settingsBtn) settingsBtn.addEventListener('click', () => {
-            try {
-              if (typeof chrome !== 'undefined' && chrome.runtime && chrome.runtime.id && chrome.runtime.openOptionsPage) {
-                chrome.runtime.openOptionsPage();
-              } else if (typeof chrome !== 'undefined' && chrome.runtime && chrome.runtime.id && chrome.runtime.getURL) {
-                window.open(chrome.runtime.getURL('options/options.html'), '_blank');
-              }
-            } catch (e) {}
-          });
+          if (settingsBtn) settingsBtn.addEventListener('click', () => this.openSettings());
           return;
         }
 
@@ -860,9 +874,9 @@
 
         container.innerHTML = `
           <div class="non-finance-view">
-            <p class="non-finance-prompt">Ready to analyze ${this.pageData.company || 'this document'}?</p>
+            <p class="non-finance-prompt">Ready to analyze ${this.pageData.company || 'this page'}?</p>
             <button class="btn-dark-cta" id="btn-manual-analyze">
-              Analyze this page
+              Analyze Page
             </button>
             <div class="non-finance-notice">
               Click to run AI summary, extract key risk disclosures, and evaluate coverage tone. All processing runs on-demand with your API key.
@@ -911,9 +925,12 @@
                 <p class="non-financial-text">
                   ${this.lastAnalysisError}. Verify your API key in Settings or check network connection.
                 </p>
-                <div class="choice-buttons" style="margin-top: 10px;">
+                <div class="choice-buttons" style="margin-top: 10px; display: flex; gap: 8px;">
                   <button class="btn-dark-cta" id="btn-retry-analyze">
                     ${ICONS.sparkle} <span>Try again</span>
+                  </button>
+                  <button class="coral-btn" id="btn-notice-settings" style="font-size: 11.5px; padding: 7px 12px;">
+                    Open Settings
                   </button>
                 </div>
               </div>
@@ -921,6 +938,8 @@
           `;
           const retryBtn = this.shadowRoot.getElementById('btn-retry-analyze');
           if (retryBtn) retryBtn.addEventListener('click', () => this.runSummaryAnalysis());
+          const noticeSettingsBtn = this.shadowRoot.getElementById('btn-notice-settings');
+          if (noticeSettingsBtn) noticeSettingsBtn.addEventListener('click', () => this.openSettings());
           return;
         }
         return;
@@ -982,6 +1001,7 @@
           <h2 class="section-headline" style="margin-bottom: 0;">${this.activeFilingContext ? 'Filing Summary' : (this.pageData.isFinanceSite ? 'Filing summary' : 'Page summary')}</h2>
           <button class="coral-btn" id="btn-reanalyze" style="font-size: 11px; padding: 4px 8px;">Re-analyze</button>
         </div>
+
 
         <!-- What This Page Is About (Executive Context) -->
         <div class="summary-page-overview-box">
@@ -1233,7 +1253,7 @@
         await this.renderTab('summary');
         this.showToast(`✓ Loaded ${cleanTicker} (${filingData.formType}) summary`);
       } catch (err) {
-        console.error('Prospectus: viewFilingSummary error:', err);
+        console.warn('Prospectus: viewFilingSummary error:', err.message || err);
         this.isAnalyzing = false;
         this.lastAnalysisError = err.message;
         await this.renderTab('summary');
@@ -1274,7 +1294,7 @@
       this.renderTab(this.activeTab);
 
       try {
-        // If PDF document, extract full readable text from PDF binary streams
+        // 1. If PDF document, extract full readable text from PDF binary streams
         if (
           this.pageData &&
           (this.pageData.siteType === 'pdf_document' || window.location.pathname.endsWith('.pdf') || window.location.href.includes('.pdf')) &&
@@ -1303,6 +1323,36 @@
           } catch (pdfErr) {
             console.warn('Prospectus: PDF extraction error:', pdfErr);
           }
+        }
+
+        // 2. Deep asynchronous extraction for any embedded documents inside the webpage (iframes, embed tags, PDF viewers, shadow DOM)
+        try {
+          const asyncDocs = await FinancialExtractors.extractEmbeddedDocumentsAsync();
+          if (asyncDocs && asyncDocs.length > 0) {
+            this.pageData.hasEmbeddedDocuments = true;
+            this.pageData.embeddedDocuments = asyncDocs;
+
+            let embeddedSectionText = '';
+            for (const doc of asyncDocs) {
+              if (doc.text && doc.text.length > 50) {
+                embeddedSectionText += `\n\n${doc.text}\n`;
+
+                // If embedded document has high-signal SEC sections, adopt them
+                if (doc.riskFactorsText && !this.pageData.riskFactorsText) this.pageData.riskFactorsText = doc.riskFactorsText;
+                if (doc.mdaText && !this.pageData.mdaText) this.pageData.mdaText = doc.mdaText;
+                if (doc.businessText && !this.pageData.businessText) this.pageData.businessText = doc.businessText;
+                if (doc.ticker && (!this.pageData.ticker || this.pageData.ticker === 'PAGE')) this.pageData.ticker = doc.ticker;
+                if (doc.company && (!this.pageData.company || this.pageData.company === 'Web Document')) this.pageData.company = doc.company;
+                if (doc.isFinancial) this.pageData.isFinanceSite = true;
+              }
+            }
+
+            if (embeddedSectionText) {
+              this.pageData.fullText = embeddedSectionText + '\n\n' + (this.pageData.fullText || '');
+            }
+          }
+        } catch (e) {
+          console.warn('Prospectus: extractEmbeddedDocumentsAsync in summary error:', e);
         }
 
         const res = await this.ai.generateSummary({
@@ -1384,15 +1434,7 @@
           if (retryBtn) retryBtn.addEventListener('click', () => this.runSummaryAnalysis());
 
           const settingsBtn = this.shadowRoot.getElementById('btn-error-settings-what');
-          if (settingsBtn) settingsBtn.addEventListener('click', () => {
-            try {
-              if (typeof chrome !== 'undefined' && chrome.runtime && chrome.runtime.id && chrome.runtime.openOptionsPage) {
-                chrome.runtime.openOptionsPage();
-              } else if (typeof chrome !== 'undefined' && chrome.runtime && chrome.runtime.id && chrome.runtime.getURL) {
-                window.open(chrome.runtime.getURL('options/options.html'), '_blank');
-              }
-            } catch (e) {}
-          });
+          if (settingsBtn) settingsBtn.addEventListener('click', () => this.openSettings());
           return;
         }
 
@@ -1817,8 +1859,19 @@
 
         if (body) body.textContent = finalExplanation;
       } catch (err) {
-        finalExplanation = `In this document, "${term}" is referenced in relation to operational and financial disclosures. (Configure your API key in settings for deeper contextual numbers).`;
-        if (body) body.textContent = finalExplanation;
+        console.warn('Explain term API error:', err.message);
+        finalExplanation = `In this document, "${term}" is referenced in relation to operational and financial disclosures.`;
+        if (body) {
+          body.innerHTML = `
+            <div>${finalExplanation}</div>
+            <div class="tab-inline-error-notice" style="margin-top: 10px; padding: 8px 12px; background: #fff5f2; border: 1px solid #f2d4cc; border-radius: 6px; font-size: 12px; color: #a9583e; display: flex; justify-content: space-between; align-items: center;">
+              <span>⚠️ API Error: ${err.message || 'Please check your API key in Settings'}</span>
+              <button type="button" class="coral-btn" style="padding: 3px 8px; font-size: 11px; margin-left: 8px; white-space: nowrap;" id="btn-explain-settings">Settings</button>
+            </div>
+          `;
+          const expSetBtn = this.shadowRoot.getElementById('btn-explain-settings');
+          if (expSetBtn) expSetBtn.addEventListener('click', () => this.openSettings());
+        }
       }
 
       const saveBtn = this.shadowRoot.getElementById('btn-save-explain-note');
@@ -3127,6 +3180,7 @@
             });
           };
         } catch (err) {
+          console.warn('Deep Research AI error:', err.message);
           let webSources = [];
           if (isWebOn && this.ai) {
             try {
@@ -3150,7 +3204,15 @@
             fallback = `**Executive Takeaway:** Analysis for **"${q}"** synthesizes available operational disclosures and financial principles.\n\n• **Core Analysis:** Topic inquiries examine underlying market dynamics, balance sheet mechanics, or disclosed guidance.\n• **Verification:** Review corresponding filing tables and notes for itemized data points.\n\n*Source: Evaluated from financial disclosures and reference analysis.*`;
           }
 
-          let responseHtml = formatDeepResearchResponse(fallback);
+          const errorBanner = `
+            <div class="adv-error-notice" style="margin-bottom: 12px; padding: 10px 14px; background: #fff5f2; border: 1px solid #f2d4cc; border-radius: 8px; font-size: 12px; color: #a9583e; display: flex; justify-content: space-between; align-items: center;">
+              <div>
+                <strong>⚠️ API Notice:</strong> ${err.message || 'Unable to connect to AI provider'}.
+              </div>
+              <button type="button" class="coral-btn btn-adv-settings" style="font-size: 11px; padding: 4px 8px; margin-left: 10px; white-space: nowrap;">Settings</button>
+            </div>
+          `;
+          let responseHtml = errorBanner + formatDeepResearchResponse(fallback);
           if (webSources && webSources.length > 0) {
             responseHtml += `
               <div class="adv-web-citations-box">
@@ -3169,6 +3231,9 @@
 
           respText.innerHTML = responseHtml;
           respCard.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+
+          const settingsBtn = respCard.querySelector('.btn-adv-settings');
+          if (settingsBtn) settingsBtn.addEventListener('click', () => this.openSettings());
 
           respSaveBtn.onclick = () => {
             this.openSaveNoteModal({
@@ -3298,6 +3363,12 @@
               return true;
             }
 
+            if (request.action === 'GET_PAGE_DATA') {
+              if (!this.pageData) this.pageData = FinancialExtractors.extractPageData();
+              sendResponse({ success: true, pageData: this.pageData });
+              return true;
+            }
+
             if (request.action === 'EXPLAIN_SELECTION') {
               this.openPanel();
               this.switchTab('explain');
@@ -3328,6 +3399,24 @@
         }
       } catch (e) {
         console.warn('Prospectus: Messaging listener skipped due to context reload');
+      }
+    }
+
+    openSettings() {
+      try {
+        if (typeof chrome !== 'undefined' && chrome.runtime && chrome.runtime.id && chrome.runtime.sendMessage) {
+          chrome.runtime.sendMessage({ action: 'OPEN_OPTIONS' }, (res) => {
+            if (typeof chrome !== 'undefined' && chrome.runtime && chrome.runtime.lastError) {
+              console.warn('Prospectus: OPEN_OPTIONS message error:', chrome.runtime.lastError.message);
+              try {
+                chrome.runtime.sendMessage({ action: 'OPEN_SETTINGS' });
+              } catch (e) {}
+            }
+          });
+          return;
+        }
+      } catch (err) {
+        console.warn('Prospectus: Failed to open settings via runtime message:', err);
       }
     }
 

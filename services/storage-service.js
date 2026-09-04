@@ -4,9 +4,9 @@
  */
 
 const DEFAULT_SETTINGS = {
-  aiProvider: 'openai', // 'openai' | 'anthropic' | 'gemini' | 'openrouter' | 'custom'
+  aiProvider: 'anthropic', // 'anthropic' | 'openai' | 'gemini' | 'openrouter' | 'custom'
   apiKey: '',
-  modelName: 'gpt-4o-mini',
+  modelName: 'claude-sonnet-5',
   customEndpoint: '',
   temperature: 0.2,
   licenseKey: '',
@@ -197,10 +197,11 @@ class StorageService {
   // --- License & Access ---
   async getUsageInfo() {
     const settings = await this.getSettings();
-    const isLicensed = !!settings.isLicensed && !!(settings.licenseKey && settings.licenseKey.trim());
+    const key = (settings.licenseKey || '').trim().toUpperCase();
+    const isLicensed = !!settings.isLicensed && !!key && ['PRS-8F2A-4D9C-7B1E', 'PRS-5E3B-9A7D-2C6F'].includes(key);
     return {
       isLicensed,
-      licenseKey: settings.licenseKey || '',
+      licenseKey: isLicensed ? key : '',
     };
   }
 

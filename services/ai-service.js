@@ -8,19 +8,103 @@ const SYSTEM_COMPLIANCE_PROMPT = `You are Prospectus, an elite financial researc
 CRITICAL COMPLIANCE AND EDITORIAL RULES:
 1. STRICTLY DESCRIPTIVE: You report what the filing, transcript, or document states factually. You NEVER give buy, sell, or hold recommendations, price targets, or predictive market forecasts.
 2. INSTITUTIONAL PRECISION: Focus on hard numbers, operational drivers, margin trends, supply chain vulnerabilities, capex guidance shifts, and legal/regulatory changes.
-3. NO FLUFF: Avoid generic boilerplate definitions. Use direct, dense, and objective financial language.`;
+3. NO FLUFF: Avoid generic boilerplate definitions. Use direct, dense, and objective financial language.
+4. NO ADVERTISEMENTS OR SPONSORED PROMOTIONS: Ignore and discard any promotional messages, advertisements, sponsored links, or marketing blurbs in the source text. Never include ads or sponsored campaigns in your analysis.
+5. NO MENTION OF EMBEDDED CONTAINERS: Summarize the document and company directly. Do not explicitly state that content was extracted from an iframe, viewer, or embedded container.`;
 
 class AIService {
   constructor(storageService) {
     this.storage = storageService || (typeof window !== 'undefined' ? window.ProspectusStorage : null);
   }
 
+  _normalizeModel(provider, rawModel) {
+    if (!rawModel || typeof rawModel !== 'string') {
+      return provider === 'anthropic' ? 'claude-sonnet-5' : (provider === 'openai' ? 'gpt-5.4-mini' : 'gemini-3.8-flash');
+    }
+
+    // 1. Strip any '(Recommended)', '(Latest)', '(via OpenRouter)', or trailing descriptors
+    let model = rawModel
+      .replace(/\s*\([^)]*recommended[^)]*\)/gi, '')
+      .replace(/\s*\([^)]*via openrouter[^)]*\)/gi, '')
+      .replace(/\s*\([^)]*local[^)]*\)/gi, '')
+      .trim();
+
+    // 2. Map human-readable model titles to official backend API model IDs
+    const MODEL_ID_MAP = {
+      'claude sonnet 5': 'claude-sonnet-5',
+      'claude fable 5': 'claude-fable-5',
+      'claude opus 5': 'claude-opus-5',
+      'claude haiku 4.5': 'claude-haiku-4-5',
+      'claude opus 4.8': 'claude-opus-4-8',
+      'claude opus 4.7': 'claude-opus-4-7',
+      'claude opus 4.6': 'claude-opus-4-6',
+      'claude opus 4.5': 'claude-opus-4-5-20251101',
+      'claude sonnet 4.6': 'claude-sonnet-4-6',
+      'claude sonnet 4.5': 'claude-sonnet-4-5-20250929',
+      'gpt-5.6 sol': 'gpt-5.6-sol',
+      'gpt-5.6 terra': 'gpt-5.6-terra',
+      'gpt-5.6 luna': 'gpt-5.6-luna',
+      'gpt-5.6 cyber': 'gpt-5.6-cyber',
+      'gpt-5.5 pro': 'gpt-5.5-pro',
+      'gpt-5.4 pro': 'gpt-5.4-pro',
+      'gpt-5.4 mini': 'gpt-5.4-mini',
+      'gpt-5.4 nano': 'gpt-5.4-nano',
+      'gpt-5.3 codex': 'gpt-5.3-codex',
+      'gpt-5.2 pro': 'gpt-5.2-pro',
+      'gpt-5.1 chat latest': 'gpt-5.1-chat-latest',
+      'gpt-5 mini': 'gpt-5-mini',
+      'gpt-5 nano': 'gpt-5-nano',
+      'gpt-5 pro': 'gpt-5-pro',
+      'gpt-4.1 mini': 'gpt-4.1-mini',
+      'gpt-4.1 nano': 'gpt-4.1-nano',
+      'gemini 3.8 flash': 'gemini-3.8-flash',
+      'gemini 3.7 flash': 'gemini-3.7-flash',
+      'gemini 3.6 flash': 'gemini-3.6-flash',
+      'gemini 3.5 flash': 'gemini-3.5-flash',
+      'gemini 3.5 flash lite': 'gemini-3.5-flash-lite',
+      'gemini 3.1 flash lite': 'gemini-3.1-flash-lite',
+      'gemini 3.1 pro preview': 'gemini-3.1-pro-preview',
+      'gemini 3 flash preview': 'gemini-3-flash-preview',
+    };
+
+    const lower = model.toLowerCase();
+
+    // Provider-specific prefix mappings for OpenRouter & Local
+    if (provider === 'openrouter') {
+      const openRouterMap = {
+        'claude sonnet 5': 'anthropic/claude-sonnet-5',
+        'gpt-5.6': 'openai/gpt-5.6',
+        'gemini 3.8 flash': 'google/gemini-3.8-flash',
+        'deepseek r1': 'deepseek/deepseek-r1',
+        'llama 3.3 70b instruct': 'meta-llama/llama-3.3-70b-instruct',
+      };
+      if (openRouterMap[lower]) return openRouterMap[lower];
+    }
+
+    if (provider === 'custom') {
+      const customMap = {
+        'llama 3': 'llama3',
+        'mistral': 'mistral',
+        'deepseek r1': 'deepseek-r1',
+        'qwen 2.5': 'qwen2.5',
+      };
+      if (customMap[lower]) return customMap[lower];
+    }
+
+    if (MODEL_ID_MAP[lower]) {
+      return MODEL_ID_MAP[lower];
+    }
+
+    return provider === 'custom' ? model : model.toLowerCase();
+  }
+
   async getCredentials() {
     const settings = await this.storage.getSettings();
+    const provider = settings.aiProvider || 'anthropic';
     return {
-      provider: settings.aiProvider || 'openai',
+      provider: provider,
       apiKey: (settings.apiKey || '').trim(),
-      model: settings.modelName || 'gpt-4o-mini',
+      model: this._normalizeModel(provider, settings.modelName || 'claude-sonnet-5'),
       customEndpoint: (settings.customEndpoint || '').trim(),
       temperature: typeof settings.temperature === 'number' ? settings.temperature : 0.2,
     };
@@ -100,17 +184,14 @@ class AIService {
             ok: response.ok,
             status: response.status,
             statusText: response.statusText,
-            json: async () => response.data || {},
+            json: async () => response.data || JSON.parse(response.text || '{}'),
             text: async () => response.text || '',
           };
-        } else if (response && response.error) {
-          throw new Error(response.error);
+        } else {
+          throw new Error(response?.error || 'Background fetch proxy failed');
         }
       } catch (proxyErr) {
-        // If extension context was invalidated (e.g. extension reloaded while tab was open)
-        if (proxyErr.message && proxyErr.message.includes('Extension context invalidated')) {
-          throw new Error('Prospectus extension was reloaded. Please refresh this webpage to reconnect.');
-        }
+        console.warn('Prospectus: Background proxy fetch failed, attempting direct fetch:', proxyErr.message);
       }
     }
 
@@ -127,26 +208,42 @@ class AIService {
   // --- OpenAI Client ---
   async _callOpenAI({ creds, systemPrompt, userPrompt, jsonMode }) {
     const endpoint = 'https://api.openai.com/v1/chat/completions';
-    const payload = {
-      model: creds.model || 'gpt-4o-mini',
-      messages: [
-        { role: 'system', content: systemPrompt },
-        { role: 'user', content: userPrompt },
-      ],
-      temperature: creds.temperature,
-    };
-    if (jsonMode) {
-      payload.response_format = { type: 'json_object' };
-    }
+    const primaryModel = this._normalizeModel('openai', creds.model || 'gpt-5.4-mini');
 
-    const res = await this._fetch(endpoint, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: `Bearer ${creds.apiKey}`,
-      },
-      body: JSON.stringify(payload),
-    });
+    const sendRequest = async (modelToUse) => {
+      const payload = {
+        model: modelToUse,
+        messages: [
+          { role: 'system', content: systemPrompt },
+          { role: 'user', content: userPrompt },
+        ],
+        temperature: creds.temperature,
+      };
+      if (jsonMode) {
+        payload.response_format = { type: 'json_object' };
+      }
+
+      return await this._fetch(endpoint, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${creds.apiKey}`,
+        },
+        body: JSON.stringify(payload),
+      });
+    };
+
+    let res = await sendRequest(primaryModel);
+
+    // Resilience fallback if selected preview model is not yet permitted on user API tier
+    if (!res.ok && (res.status === 404 || res.status === 400)) {
+      const errData = await res.json().catch(() => ({}));
+      const errMsg = (errData.error?.message || '').toLowerCase();
+      if (errMsg.includes('model') && (errMsg.includes('does not exist') || errMsg.includes('not found') || errMsg.includes('access'))) {
+        console.warn(`OpenAI model ${primaryModel} not active on key, falling back to gpt-4o-mini`);
+        res = await sendRequest('gpt-4o-mini');
+      }
+    }
 
     if (!res.ok) {
       const err = await res.json().catch(() => ({}));
@@ -160,24 +257,44 @@ class AIService {
   // --- Anthropic Claude Client ---
   async _callAnthropic({ creds, systemPrompt, userPrompt }) {
     const endpoint = 'https://api.anthropic.com/v1/messages';
-    const payload = {
-      model: creds.model || 'claude-3-5-haiku-20241022',
-      max_tokens: 2000,
-      system: systemPrompt,
-      messages: [{ role: 'user', content: userPrompt }],
-      temperature: creds.temperature,
+    const primaryModel = this._normalizeModel('anthropic', creds.model || 'claude-sonnet-5');
+
+    const sendRequest = async (modelToUse) => {
+      const payload = {
+        model: modelToUse,
+        max_tokens: 2500,
+        system: systemPrompt,
+        messages: [{ role: 'user', content: userPrompt }],
+        temperature: creds.temperature,
+      };
+
+      return await this._fetch(endpoint, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'x-api-key': creds.apiKey,
+          'anthropic-version': '2023-06-01',
+          'anthropic-dangerous-direct-browser-access': 'true',
+        },
+        body: JSON.stringify(payload),
+      });
     };
 
-    const res = await this._fetch(endpoint, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'x-api-key': creds.apiKey,
-        'anthropic-version': '2023-06-01',
-        'anthropic-dangerous-direct-browser-access': 'true',
-      },
-      body: JSON.stringify(payload),
-    });
+    let res = await sendRequest(primaryModel);
+
+    // Automatic resilience: If the configured preview model is not yet active on this key,
+    // fallback gracefully to current active flagship tier so research continues seamlessly.
+    if (!res.ok && res.status === 404) {
+      const errData = await res.json().catch(() => ({}));
+      const errMsg = (errData.error?.message || '').toLowerCase();
+      if (errMsg.includes('not_found') || errMsg.includes('model')) {
+        console.warn(`Anthropic model ${primaryModel} not found on this API tier, falling back to claude-3-7-sonnet-20250219`);
+        res = await sendRequest('claude-3-7-sonnet-20250219');
+        if (!res.ok && res.status === 404) {
+          res = await sendRequest('claude-3-5-sonnet-20241022');
+        }
+      }
+    }
 
     if (!res.ok) {
       const err = await res.json().catch(() => ({}));
@@ -190,34 +307,47 @@ class AIService {
 
   // --- Google Gemini Client ---
   async _callGemini({ creds, systemPrompt, userPrompt, jsonMode, enableWebSearch = false }) {
-    const model = creds.model || 'gemini-2.0-flash';
-    const endpoint = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${creds.apiKey}`;
+    const primaryModel = this._normalizeModel('gemini', creds.model || 'gemini-3.8-flash');
 
-    const payload = {
-      contents: [
-        {
-          role: 'user',
-          parts: [{ text: `${systemPrompt}\n\nTask:\n${userPrompt}` }],
+    const sendRequest = async (modelToUse) => {
+      const endpoint = `https://generativelanguage.googleapis.com/v1beta/models/${modelToUse}:generateContent?key=${creds.apiKey}`;
+      const payload = {
+        contents: [
+          {
+            role: 'user',
+            parts: [{ text: `${systemPrompt}\n\nTask:\n${userPrompt}` }],
+          },
+        ],
+        generationConfig: {
+          temperature: creds.temperature,
         },
-      ],
-      generationConfig: {
-        temperature: creds.temperature,
-      },
+      };
+
+      if (jsonMode) {
+        payload.generationConfig.responseMimeType = 'application/json';
+      }
+
+      if (enableWebSearch && !jsonMode) {
+        payload.tools = [{ googleSearch: {} }];
+      }
+
+      return await this._fetch(endpoint, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
     };
 
-    if (jsonMode) {
-      payload.generationConfig.responseMimeType = 'application/json';
-    }
+    let res = await sendRequest(primaryModel);
 
-    if (enableWebSearch && !jsonMode) {
-      payload.tools = [{ googleSearch: {} }];
+    // Fallback if model not found
+    if (!res.ok && res.status === 404) {
+      console.warn(`Gemini model ${primaryModel} not found, falling back to gemini-2.0-flash`);
+      res = await sendRequest('gemini-2.0-flash');
+      if (!res.ok && res.status === 404) {
+        res = await sendRequest('gemini-1.5-flash');
+      }
     }
-
-    const res = await this._fetch(endpoint, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(payload),
-    });
 
     if (!res.ok) {
       const err = await res.json().catch(() => ({}));
@@ -252,8 +382,9 @@ class AIService {
   // --- OpenRouter Client ---
   async _callOpenRouter({ creds, systemPrompt, userPrompt, jsonMode }) {
     const endpoint = 'https://openrouter.ai/api/v1/chat/completions';
+    const model = this._normalizeModel('openrouter', creds.model || 'anthropic/claude-sonnet-5');
     const payload = {
-      model: creds.model || 'meta-llama/llama-3.3-70b-instruct',
+      model: model,
       messages: [
         { role: 'system', content: systemPrompt },
         { role: 'user', content: userPrompt },
@@ -287,8 +418,9 @@ class AIService {
   // --- Custom Endpoint ---
   async _callCustom({ creds, systemPrompt, userPrompt, jsonMode }) {
     const endpoint = creds.customEndpoint || 'http://localhost:11434/v1/chat/completions';
+    const model = this._normalizeModel('custom', creds.model || 'default');
     const payload = {
-      model: creds.model || 'default',
+      model: model,
       messages: [
         { role: 'system', content: systemPrompt },
         { role: 'user', content: userPrompt },
@@ -359,14 +491,22 @@ class AIService {
    */
   async generateSummary({ ticker, company, formType, text, headlines = [] }) {
     const mainHeadline = (headlines && headlines.length > 0 && headlines[0]) ? headlines[0] : (company || 'Document');
+    const cleanDocText = typeof FinancialExtractors !== 'undefined' && FinancialExtractors.stripAdText
+      ? FinancialExtractors.stripAdText(text || '')
+      : (text || '').replace(/^\s*(?:advertisement|sponsored content|promoted stories|ad choices)[\s:–-]*$/gim, '');
+
     const prompt = `You are an elite financial research analyst. Analyze the following extracted document / article content:
 Topic / Headline: ${mainHeadline}
 Document Type: ${formType || 'Financial Report / Market Analysis'}
 Subject: ${company} (${ticker || 'N/A'})
 
+CRITICAL FILTERING & PRESENTATION:
+- EXCLUDE ALL ADS & SPONSORED PROMOTIONS: Ignore and discard any advertisements, marketing messages, subscription prompts, or sponsor disclaimers in the text. Never mention ads in your analysis.
+- UNIFIED DOCUMENT ANALYSIS: Treat all provided text directly as the primary document itself. Do not mention iframes, embedded viewers, or HTML containers in your summary.
+
 Extracted High-Signal Document / Article Text:
 """
-${text.slice(0, 16000)}
+${cleanDocText.slice(0, 16000)}
 """
 
 Recent Headlines / Context:

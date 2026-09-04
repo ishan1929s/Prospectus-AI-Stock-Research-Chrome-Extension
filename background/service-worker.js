@@ -3,6 +3,21 @@
  * Manages context menus, alarms, keyboard shortcuts, and tab messaging.
  */
 
+// Global error handlers to prevent unhandled rejections or runtime crashes from throwing to Chrome
+self.addEventListener('unhandledrejection', (event) => {
+  if (event && event.reason) {
+    console.warn('Prospectus worker handled rejection:', event.reason.message || event.reason);
+  }
+  event.preventDefault();
+});
+
+self.addEventListener('error', (event) => {
+  if (event) {
+    console.warn('Prospectus worker handled error:', event.message || event);
+  }
+  event.preventDefault();
+});
+
 // Initialize context menus and alarms on extension install
 chrome.runtime.onInstalled.addListener(async () => {
   // Context menus
@@ -116,10 +131,42 @@ try {
   );
 } catch (e) {}
 
+function openSettingsPage() {
+  const optionsUrl = chrome.runtime.getURL('options/options.html');
+  try {
+    if (chrome.runtime.openOptionsPage) {
+      chrome.runtime.openOptionsPage(() => {
+        if (chrome.runtime.lastError) {
+          chrome.tabs.query({}, (tabs) => {
+            const existing = (tabs || []).find((t) => t.url && t.url.includes('options/options.html'));
+            if (existing) {
+              chrome.tabs.update(existing.id, { active: true });
+              if (existing.windowId) chrome.windows.update(existing.windowId, { focused: true }).catch(() => {});
+            } else {
+              chrome.tabs.create({ url: optionsUrl });
+            }
+          });
+        }
+      });
+      return;
+    }
+  } catch (e) {}
+
+  chrome.tabs.query({}, (tabs) => {
+    const existing = (tabs || []).find((t) => t.url && t.url.includes('options/options.html'));
+    if (existing) {
+      chrome.tabs.update(existing.id, { active: true });
+      if (existing.windowId) chrome.windows.update(existing.windowId, { focused: true }).catch(() => {});
+    } else {
+      chrome.tabs.create({ url: optionsUrl });
+    }
+  });
+}
+
 // Message listener for actions from content scripts or popup
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
-  if (message && message.action === 'OPEN_OPTIONS') {
-    chrome.runtime.openOptionsPage();
+  if (message && (message.action === 'OPEN_OPTIONS' || message.action === 'OPEN_SETTINGS')) {
+    openSettingsPage();
     sendResponse({ success: true });
     return true;
   }

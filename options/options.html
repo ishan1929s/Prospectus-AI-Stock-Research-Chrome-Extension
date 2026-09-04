@@ -27,22 +27,38 @@
     </header>
 
     <!-- License Activation Card -->
-    <section class="settings-card">
+    <section class="settings-card" id="license-card">
       <div class="card-header-row">
         <div>
           <h2>License & Activation</h2>
-          <p class="section-subtext">Enter your purchase license key provided with your download.</p>
+          <p class="section-subtext" id="license-subtext">Enter your purchase license key provided with your download.</p>
         </div>
         <div id="license-badge" class="badge-status">License Required</div>
       </div>
 
-      <div class="form-group">
+      <!-- Activation Key Input Group (automatically hidden/removed when activated) -->
+      <div class="form-group" id="license-input-group">
         <label for="license-key-input">License Key</label>
         <div class="input-with-action">
-          <input type="text" id="license-key-input" placeholder="e.g. PROSP-XXXX-XXXX-XXXX or Gumroad Key" class="text-input" />
-          <button id="btn-activate-license" class="btn-primary">Activate</button>
+          <input type="text" id="license-key-input" placeholder="e.g. PRS-8F2A-4D9C-7B1E" class="text-input" autocomplete="off" spellcheck="false" />
+          <button id="btn-activate-license" class="btn-primary" type="button">Activate</button>
         </div>
         <span id="license-msg" class="field-hint"></span>
+      </div>
+
+      <!-- License Activated State (displayed when activated; replaces the key input) -->
+      <div id="license-active-group" class="license-active-box" style="display: none;">
+        <div class="license-active-info">
+          <div class="license-active-title">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#23654b" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"></path>
+              <polyline points="22 4 12 14.01 9 11.01"></polyline>
+            </svg>
+            <span>License Active · Unlimited Analyses</span>
+          </div>
+          <p class="license-active-desc">Your activation key is verified and safely stored. Key entry has been removed.</p>
+        </div>
+        <button id="btn-deactivate-license" class="btn-secondary btn-sm" type="button">Deactivate / Change Key</button>
       </div>
     </section>
 
@@ -54,7 +70,7 @@
       <div class="form-group">
         <label for="ai-provider-select">Provider</label>
         <select id="ai-provider-select" class="text-input">
-          <option value="anthropic">Claude (Recommended)</option>
+          <option value="anthropic">Anthropic</option>
           <option value="openai">OpenAI</option>
           <option value="gemini">Google Gemini</option>
           <option value="openrouter">OpenRouter</option>
@@ -70,7 +86,7 @@
         <input
           type="text"
           id="model-name-custom-input"
-          placeholder="Enter custom model name (e.g. claude-3-7-sonnet-20250219)..."
+          placeholder="Enter custom model name (e.g. claude-sonnet-5)..."
           class="text-input"
           style="display: none; margin-top: 8px;"
         />

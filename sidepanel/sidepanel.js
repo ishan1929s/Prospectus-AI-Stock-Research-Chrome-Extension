@@ -19,6 +19,36 @@ document.addEventListener('DOMContentLoaded', async () => {
   let webSearchEnabled = true;
   let activeFilingContext = null;
   let originalPageState = null;
+  let lastAnalysisError = null;
+
+  // Suppress harmless extension reload, API, and connection errors from throwing to Chrome
+  if (typeof window !== 'undefined') {
+    window.addEventListener('unhandledrejection', (event) => {
+      const msg = (event && event.reason && (event.reason.message || String(event.reason))) || '';
+      if (
+        msg.includes('Extension context invalidated') ||
+        msg.includes('message port closed') ||
+        msg.includes('Receiving end does not exist') ||
+        msg.includes('API error') ||
+        msg.includes('API key') ||
+        msg.includes('fetch') ||
+        msg.includes('Failed to fetch')
+      ) {
+        event.preventDefault();
+      }
+    });
+
+    window.addEventListener('error', (event) => {
+      const msg = (event && event.message) || '';
+      if (
+        msg.includes('Extension context invalidated') ||
+        msg.includes('message port closed') ||
+        msg.includes('Receiving end does not exist')
+      ) {
+        event.preventDefault();
+      }
+    });
+  }
 
   const ICONS = {
     doc: `<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#cc785c" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><polyline points="14 2 14 8 20 8"></polyline><line x1="16" y1="13" x2="8" y2="13"></line><line x1="16" y1="17" x2="8" y2="17"></line><polyline points="10 9 9 9 8 9"></polyline></svg>`,
@@ -94,55 +124,81 @@ document.addEventListener('DOMContentLoaded', async () => {
         fullText: `PDF Document: ${cleanName}\nURL: ${url}`,
       };
     } else {
-      // Attempt to extract from tab via scripting if allowed
+      // First attempt to get rich pageData from content script
+      let gotData = false;
       try {
-        const results = await chrome.scripting.executeScript({
-          target: { tabId: activeTab.id },
-          func: () => {
-            return {
-              title: document.title,
-              url: window.location.href,
-              bodyText: (document.body ? document.body.innerText : '').slice(0, 20000),
-            };
-          },
+        const msgRes = await new Promise((resolve) => {
+          chrome.tabs.sendMessage(activeTab.id, { action: 'GET_PAGE_DATA' }, (response) => {
+            if (chrome.runtime.lastError || !response || !response.pageData) {
+              return resolve(null);
+            }
+            resolve(response.pageData);
+          });
         });
+        if (msgRes) {
+          pageData = msgRes;
+          gotData = true;
+        }
+      } catch (e) {}
 
-        if (results && results[0] && results[0].result) {
-          const res = results[0].result;
-          const isFin = FinancialExtractors.isFinancialContent(res.bodyText, res.title, res.url);
-          const tickerMatch = (res.title + ' ' + res.bodyText.slice(0, 1000)).match(/\b([A-Z]{1,5})\s*(?:\(NYSE|\(NASDAQ|:NYSE|:NASDAQ)/i);
+      if (!gotData) {
+        // Fallback: executeScript with FinancialExtractors or basic DOM extractor
+        try {
+          const results = await chrome.scripting.executeScript({
+            target: { tabId: activeTab.id },
+            func: () => {
+              if (typeof FinancialExtractors !== 'undefined') {
+                return FinancialExtractors.extractPageData();
+              }
+              return {
+                title: document.title,
+                url: window.location.href,
+                bodyText: (document.body ? document.body.innerText : '').slice(0, 20000),
+              };
+            },
+          });
 
+          if (results && results[0] && results[0].result) {
+            const res = results[0].result;
+            if (res.fullText) {
+              pageData = res;
+            } else {
+              const isFin = FinancialExtractors.isFinancialContent(res.bodyText, res.title, res.url);
+              const tickerMatch = (res.title + ' ' + res.bodyText.slice(0, 1000)).match(/\b([A-Z]{1,5})\s*(?:\(NYSE|\(NASDAQ|:NYSE|:NASDAQ)/i);
+
+              pageData = {
+                isFinanceSite: isFin,
+                isReportPage: isFin,
+                siteType: 'web_page',
+                ticker: tickerMatch ? tickerMatch[1].toUpperCase() : 'PAGE',
+                company: res.title ? res.title.slice(0, 60) : 'Web Document',
+                exchange: 'Web',
+                sector: isFin ? 'Financial Analysis' : 'General Webpage',
+                formType: isFin ? 'Article / Report' : 'Web Document',
+                filingDate: new Date().toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }),
+                periodBadge: isFin ? 'Financial Article' : 'General Page',
+                headlines: [res.title || 'Web Document'],
+                fullText: res.bodyText || '',
+              };
+            }
+          }
+        } catch (e) {
+          const isFin = FinancialExtractors.isFinancialContent('', title, url);
           pageData = {
             isFinanceSite: isFin,
             isReportPage: isFin,
-            siteType: 'web_page',
-            ticker: tickerMatch ? tickerMatch[1].toUpperCase() : 'PAGE',
-            company: res.title ? res.title.slice(0, 60) : 'Web Document',
+            siteType: 'generic_web',
+            ticker: 'PAGE',
+            company: title.slice(0, 60),
             exchange: 'Web',
-            sector: isFin ? 'Financial Analysis' : 'General Webpage',
-            formType: isFin ? 'Article / Report' : 'Web Document',
+            sector: 'Web Document',
+            formType: 'Document',
             filingDate: new Date().toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }),
-            periodBadge: isFin ? 'Financial Article' : 'General Page',
-            headlines: [res.title || 'Web Document'],
-            fullText: res.bodyText || '',
+            periodBadge: 'Web Document',
+            headlines: [title],
+            fullText: `Document Title: ${title}\nURL: ${url}`,
           };
         }
-      } catch (e) {
-        const isFin = FinancialExtractors.isFinancialContent('', title, url);
-        pageData = {
-          isFinanceSite: isFin,
-          isReportPage: isFin,
-          siteType: 'generic_web',
-          ticker: 'PAGE',
-          company: title.slice(0, 60),
-          exchange: 'Web',
-          sector: 'Web Document',
-          formType: 'Document',
-          filingDate: new Date().toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }),
-          periodBadge: 'Web Document',
-          headlines: [title],
-          fullText: `Document Title: ${title}\nURL: ${url}`,
-        };
       }
     }
   }
@@ -167,11 +223,14 @@ document.addEventListener('DOMContentLoaded', async () => {
           </div>
           <div class="brand-row">
             <div class="brand-title">
-              <strong><span class="brand-icon">${ICONS.doc}</span> Prospectus</strong>
+              <span class="brand-icon">${ICONS.doc}</span>
+              <strong>Prospectus</strong>
               <span class="brand-tag">research, organized</span>
             </div>
             <div class="header-controls">
-              <button class="btn-header-watchlist" id="btn-sp-header-watchlist" style="display: none;"></button>
+              <button class="btn-header-watchlist" id="btn-sp-header-watchlist" style="display: none;" title="Toggle Watchlist">
+                <span>+ Watchlist</span>
+              </button>
               <button class="icon-btn" id="btn-open-settings" title="Settings">${ICONS.settings}</button>
             </div>
           </div>
@@ -345,13 +404,78 @@ document.addEventListener('DOMContentLoaded', async () => {
 
     const openSettings = () => {
       try {
-        if (chrome.runtime.openOptionsPage) chrome.runtime.openOptionsPage();
-        else window.open(chrome.runtime.getURL('options/options.html'), '_blank');
+        if (typeof chrome !== 'undefined' && chrome.runtime && chrome.runtime.id && chrome.runtime.sendMessage) {
+          chrome.runtime.sendMessage({ action: 'OPEN_OPTIONS' }, () => {
+            if (chrome.runtime.lastError && chrome.runtime.openOptionsPage) {
+              chrome.runtime.openOptionsPage();
+            }
+          });
+          return;
+        }
+        if (chrome.runtime && chrome.runtime.openOptionsPage) {
+          chrome.runtime.openOptionsPage();
+        }
       } catch (e) {}
     };
 
     if (settingsBtn) settingsBtn.addEventListener('click', openSettings);
     if (footerApiGroup) footerApiGroup.addEventListener('click', openSettings);
+
+    const footerLicenseStatus = document.getElementById('footer-license-status');
+    if (footerLicenseStatus) {
+      footerLicenseStatus.style.cursor = 'pointer';
+      footerLicenseStatus.addEventListener('click', openSettings);
+    }
+
+    async function updateFooterStatus() {
+      try {
+        const settings = await storage.getSettings();
+        const usage = await storage.getUsageInfo();
+
+        const dot = document.getElementById('footer-status-dot');
+        const apiText = document.getElementById('footer-api-status');
+        const licText = document.getElementById('footer-license-status');
+
+        if (!dot || !apiText || !licText) return;
+
+        const hasApiKey = !(!settings.apiKey && settings.aiProvider !== 'custom');
+
+        if (!hasApiKey) {
+          dot.className = 'status-dot warning';
+          apiText.textContent = 'API Key needed (Settings)';
+        } else {
+          dot.className = 'status-dot';
+          apiText.textContent = 'Your API key · connected';
+        }
+
+        if (usage.isLicensed) {
+          if (hasApiKey) {
+            licText.textContent = 'Prospectus can make mistake';
+            licText.title = 'AI analyses can contain inaccuracies. Verify key filing data.';
+          } else {
+            licText.textContent = 'Unlimited · one-time purchase';
+            licText.title = 'License Active';
+          }
+          licText.style.color = '#8e8b82';
+        } else {
+          licText.textContent = 'License required';
+          licText.title = 'Click to activate license';
+          licText.style.color = '#a9583e';
+        }
+      } catch (e) {}
+    }
+
+    updateFooterStatus();
+
+    window.addEventListener('focus', updateFooterStatus);
+
+    if (typeof chrome !== 'undefined' && chrome.storage && chrome.storage.onChanged) {
+      chrome.storage.onChanged.addListener((changes, area) => {
+        if (area === 'local' && (changes.settings || changes.license)) {
+          updateFooterStatus();
+        }
+      });
+    }
 
     tabBtns.forEach((btn) => {
       btn.addEventListener('click', () => {
@@ -464,8 +588,9 @@ document.addEventListener('DOMContentLoaded', async () => {
       await renderTabContent();
       showToast(`✓ Loaded ${cleanTicker} (${filingData.formType}) summary`);
     } catch (err) {
-      console.error('Prospectus sidepanel: viewFilingSummary error:', err);
+      console.warn('Prospectus sidepanel: viewFilingSummary error:', err.message || err);
       isAnalyzing = false;
+      lastAnalysisError = err.message || 'Could not load filing summary';
       await renderTabContent();
     }
   }
@@ -556,6 +681,39 @@ document.addEventListener('DOMContentLoaded', async () => {
       return;
     }
 
+    // If error occurred during analysis
+    if (!summaryResult) {
+      if (lastAnalysisError) {
+        container.innerHTML = `
+          <div class="non-finance-view">
+            <div class="non-financial-card">
+              <div class="non-financial-badge">
+                <span class="warning-badge-pill">⚠️ Analysis Notice</span>
+              </div>
+              <h3 class="non-financial-title">Unable to complete AI analysis</h3>
+              <p class="non-financial-text">
+                ${lastAnalysisError}. Verify your API key in Settings or check network connection.
+              </p>
+              <div class="choice-buttons" style="margin-top: 10px; display: flex; gap: 8px;">
+                <button class="btn-dark-cta" id="btn-sp-retry-analyze">
+                  ${ICONS.sparkle} <span>Try again</span>
+                </button>
+                <button class="coral-btn" id="btn-sp-notice-settings" style="font-size: 11.5px; padding: 7px 12px;">
+                  Open Settings
+                </button>
+              </div>
+            </div>
+          </div>
+        `;
+        const retryBtn = document.getElementById('btn-sp-retry-analyze');
+        if (retryBtn) retryBtn.addEventListener('click', () => runSummaryAnalysis());
+        const noticeSettingsBtn = document.getElementById('btn-sp-notice-settings');
+        if (noticeSettingsBtn) noticeSettingsBtn.addEventListener('click', () => openSettings());
+        return;
+      }
+      return;
+    }
+
     const res = summaryResult;
 
     // Extract ONLY and ALL those stocks which are discussed in this summary
@@ -600,6 +758,7 @@ document.addEventListener('DOMContentLoaded', async () => {
         <h2 class="section-headline" style="margin-bottom: 0;">${activeFilingContext ? 'Filing Summary' : 'Summary'}</h2>
         <button class="coral-btn" id="btn-sp-reanalyze" style="font-size: 11px; padding: 4px 8px;">Re-analyze</button>
       </div>
+
 
       <!-- Executive Overview -->
       <div class="summary-page-overview-box">
@@ -772,7 +931,26 @@ document.addEventListener('DOMContentLoaded', async () => {
 
   async function runSummaryAnalysis() {
     isAnalyzing = true;
+    lastAnalysisError = null;
     renderActiveTab();
+
+    const check = await license.checkCanAnalyze();
+    if (!check.allowed) {
+      isAnalyzing = false;
+      lastAnalysisError = 'Prospectus license required. Please configure your license in Settings.';
+      showToast('License required. Open Settings.');
+      renderActiveTab();
+      return;
+    }
+
+    const settings = await storage.getSettings();
+    if (!settings.apiKey && settings.aiProvider !== 'custom') {
+      isAnalyzing = false;
+      lastAnalysisError = 'API key missing. Please enter your API key in Settings.';
+      showToast('API key required. Check Settings.');
+      renderActiveTab();
+      return;
+    }
 
     try {
       if (activeTab && (activeTab.url?.includes('.pdf') || activeTab.url?.startsWith('file:///'))) {
@@ -785,6 +963,7 @@ document.addEventListener('DOMContentLoaded', async () => {
           if (!text && typeof chrome !== 'undefined' && chrome.runtime && chrome.runtime.sendMessage) {
             const bgRes = await new Promise((resolve) => {
               chrome.runtime.sendMessage({ action: 'EXTRACT_PDF', url: activeTab.url }, (r) => {
+                if (chrome.runtime.lastError) return resolve(null);
                 resolve(r);
               });
             });
@@ -800,6 +979,38 @@ document.addEventListener('DOMContentLoaded', async () => {
         }
       }
 
+      // Check for and extract any documents opened inside the active webpage
+      if (activeTab && activeTab.id) {
+        try {
+          const asyncResults = await chrome.scripting.executeScript({
+            target: { tabId: activeTab.id },
+            func: async () => {
+              if (typeof FinancialExtractors !== 'undefined') {
+                return await FinancialExtractors.extractEmbeddedDocumentsAsync();
+              }
+              return [];
+            },
+          });
+          if (asyncResults && asyncResults[0] && asyncResults[0].result && asyncResults[0].result.length > 0) {
+            const docs = asyncResults[0].result;
+            pageData.hasEmbeddedDocuments = true;
+            pageData.embeddedDocuments = docs;
+            let embText = '';
+            for (const doc of docs) {
+              if (doc.text && doc.text.length > 50) {
+                embText += `\n\n${doc.text}\n`;
+                if (doc.company && (!pageData.company || pageData.company === 'Web Document')) pageData.company = doc.company;
+                if (doc.ticker && (!pageData.ticker || pageData.ticker === 'PAGE')) pageData.ticker = doc.ticker;
+                if (doc.isFinancial) pageData.isFinanceSite = true;
+              }
+            }
+            if (embText) {
+              pageData.fullText = embText + '\n\n' + (pageData.fullText || '');
+            }
+          }
+        } catch (scriptErr) {}
+      }
+
       summaryResult = await ai.generateSummary({
         ticker: pageData.ticker,
         company: pageData.company,
@@ -807,8 +1018,16 @@ document.addEventListener('DOMContentLoaded', async () => {
         text: pageData.fullText || pageData.company,
         headlines: pageData.headlines || [pageData.company],
       });
+
+      if (!summaryResult || !summaryResult.bullets || summaryResult.bullets.length === 0) {
+        throw new Error('API returned an empty response. Please try again.');
+      }
+      lastAnalysisError = null;
     } catch (e) {
-      console.error(e);
+      console.warn('Sidepanel AI analysis error:', e.message);
+      summaryResult = null;
+      lastAnalysisError = `API call error: ${e.message || 'Unable to complete AI request. Please check Settings.'}`;
+      showToast(lastAnalysisError);
     } finally {
       isAnalyzing = false;
       renderActiveTab();
@@ -817,6 +1036,34 @@ document.addEventListener('DOMContentLoaded', async () => {
 
   async function renderWhatChangedTab(container) {
     if (!summaryResult && !isAnalyzing) {
+      if (lastAnalysisError) {
+        container.innerHTML = `
+          <div class="non-finance-view">
+            <div class="non-financial-card">
+              <div class="non-financial-badge">
+                <span class="warning-badge-pill">⚠️ Analysis Notice</span>
+              </div>
+              <h3 class="non-financial-title">Unable to track changes</h3>
+              <p class="non-financial-text">
+                ${lastAnalysisError}. Verify your API key in Settings.
+              </p>
+              <div class="choice-buttons" style="margin-top: 10px; display: flex; gap: 8px;">
+                <button class="btn-dark-cta" id="btn-sp-wc-retry-analyze">
+                  ${ICONS.sparkle} <span>Try again</span>
+                </button>
+                <button class="coral-btn" id="btn-sp-wc-notice-settings" style="font-size: 11.5px; padding: 7px 12px;">
+                  Open Settings
+                </button>
+              </div>
+            </div>
+          </div>
+        `;
+        const retryBtn = document.getElementById('btn-sp-wc-retry-analyze');
+        if (retryBtn) retryBtn.addEventListener('click', () => runSummaryAnalysis());
+        const noticeSettingsBtn = document.getElementById('btn-sp-wc-notice-settings');
+        if (noticeSettingsBtn) noticeSettingsBtn.addEventListener('click', () => openSettings());
+        return;
+      }
       container.innerHTML = `
         <div class="non-finance-view">
           <p class="non-finance-prompt">Ready to track YoY & period changes for ${pageData ? pageData.company : 'this document'}?</p>
@@ -1261,8 +1508,19 @@ document.addEventListener('DOMContentLoaded', async () => {
       });
       if (body) body.textContent = finalExplanation;
     } catch (err) {
-      finalExplanation = `In this document, "${term}" is referenced in relation to operational and financial disclosures. (Configure your API key in settings for deeper contextual numbers).`;
-      if (body) body.textContent = finalExplanation;
+      console.warn('Sidepanel explain term error:', err.message);
+      finalExplanation = `In this document, "${term}" is referenced in relation to operational and financial disclosures.`;
+      if (body) {
+        body.innerHTML = `
+          <div>${finalExplanation}</div>
+          <div class="tab-inline-error-notice" style="margin-top: 10px; padding: 8px 12px; background: #fff5f2; border: 1px solid #f2d4cc; border-radius: 6px; font-size: 12px; color: #a9583e; display: flex; justify-content: space-between; align-items: center;">
+            <span>⚠️ API Error: ${err.message || 'Please check your API key in Settings'}</span>
+            <button type="button" class="coral-btn" style="padding: 3px 8px; font-size: 11px; margin-left: 8px; white-space: nowrap;" id="btn-sp-explain-settings">Settings</button>
+          </div>
+        `;
+        const expSetBtn = document.getElementById('btn-sp-explain-settings');
+        if (expSetBtn) expSetBtn.addEventListener('click', openSettings);
+      }
     }
 
     const saveBtn = document.getElementById('btn-sp-save-explain-note');
@@ -2236,6 +2494,7 @@ document.addEventListener('DOMContentLoaded', async () => {
           };
         }
       } catch (err) {
+        console.warn('Sidepanel Deep Research AI error:', err.message);
         let webSources = [];
         if (isWebOn && ai) {
           try {
@@ -2259,7 +2518,15 @@ document.addEventListener('DOMContentLoaded', async () => {
           fallback = `**Executive Takeaway:** Analysis for **"${q}"** synthesizes available operational disclosures and financial principles.\n\n• **Core Analysis:** Topic inquiries examine underlying market dynamics, balance sheet mechanics, or disclosed guidance.\n• **Verification:** Review corresponding filing tables and notes for itemized data points.\n\n*Source: Evaluated from financial disclosures and reference analysis.*`;
         }
 
-        let responseHtml = formatDeepResearchResponse(fallback);
+        const errorBanner = `
+          <div class="adv-error-notice" style="margin-bottom: 12px; padding: 10px 14px; background: #fff5f2; border: 1px solid #f2d4cc; border-radius: 8px; font-size: 12px; color: #a9583e; display: flex; justify-content: space-between; align-items: center;">
+            <div>
+              <strong>⚠️ API Notice:</strong> ${err.message || 'Unable to connect to AI provider'}.
+            </div>
+            <button type="button" class="coral-btn btn-sp-adv-settings" style="font-size: 11px; padding: 4px 8px; margin-left: 10px; white-space: nowrap;">Settings</button>
+          </div>
+        `;
+        let responseHtml = errorBanner + formatDeepResearchResponse(fallback);
         if (webSources && webSources.length > 0) {
           responseHtml += `
             <div class="adv-web-citations-box">
@@ -2278,6 +2545,9 @@ document.addEventListener('DOMContentLoaded', async () => {
 
         respText.innerHTML = responseHtml;
         respCard.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+
+        const advSetBtn = respCard.querySelector('.btn-sp-adv-settings');
+        if (advSetBtn) advSetBtn.addEventListener('click', openSettings);
 
         if (respSaveBtn) {
           respSaveBtn.onclick = async () => {

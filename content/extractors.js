@@ -127,7 +127,7 @@ class FinancialExtractors {
    */
   static extractSecEdgar() {
     const title = document.title;
-    const bodyText = document.body ? document.body.innerText : '';
+    let bodyText = document.body ? document.body.innerText : '';
     const url = window.location.href;
     let ticker = '';
     let company = '';
@@ -135,6 +135,22 @@ class FinancialExtractors {
     let filingDate = '';
     let exchange = '';
     let sector = '';
+
+    // Check if filing document is embedded inside an iframe (e.g. SEC Inline XBRL Viewer /ix?doc= or interactive viewers)
+    const embeddedDocs = this.extractEmbeddedDocumentsSync();
+    let embeddedFilingText = '';
+    for (const doc of embeddedDocs) {
+      if (doc.text && (
+        doc.text.includes('10-K') || doc.text.includes('10-Q') || doc.text.includes('8-K') ||
+        doc.text.includes('Item 1') || doc.text.includes('UNITED STATES SECURITIES') ||
+        doc.text.includes('Risk Factors') || doc.text.includes('PART I')
+      )) {
+        embeddedFilingText += '\n\n' + doc.text;
+      }
+    }
+    if (embeddedFilingText) {
+      bodyText = embeddedFilingText + '\n\n' + bodyText;
+    }
 
     // Parse URL params or URL path (e.g. /edgar/data/320193/...)
     const urlParams = new URLSearchParams(window.location.search);
@@ -250,6 +266,9 @@ class FinancialExtractors {
       periodBadge: `${formType} · ${filingDate}`,
       riskFactorsText,
       mdaText,
+      businessText,
+      hasEmbeddedDocuments: embeddedDocs.length > 0,
+      embeddedDocuments: embeddedDocs,
       headlines: [
         `${company} (${ticker}) SEC filings and regulatory disclosures`,
         `Item 1A Risk Factors, MD&A, and capital allocation reports`,
@@ -372,9 +391,19 @@ class FinancialExtractors {
       companyName = 'Market Article';
     }
 
-    // Extract main article body
+    // Extract main article body with ads stripped
     const articleBodyEl = document.querySelector('.caas-body, article, div.body, [data-testid="article-body"], main');
-    const articleText = articleBodyEl ? this.cleanSectionText(articleBodyEl.innerText) : this.cleanSectionText(document.body ? document.body.innerText : '');
+    const sourceEl = articleBodyEl || document.body;
+    let articleText = '';
+    if (sourceEl) {
+      const clone = typeof sourceEl.cloneNode === 'function' ? sourceEl.cloneNode(true) : null;
+      if (clone) {
+        this.stripAdsFromElement(clone);
+        articleText = this.cleanSectionText(clone.innerText || clone.textContent || '');
+      } else {
+        articleText = this.cleanSectionText(sourceEl.innerText || sourceEl.textContent || '');
+      }
+    }
 
     return {
       isFinanceSite: true,
@@ -412,7 +441,17 @@ class FinancialExtractors {
     });
 
     const articleBody = document.querySelector('div[data-test-id="article-content"], article');
-    const cleanContent = articleBody ? this.cleanSectionText(articleBody.innerText) : this.cleanSectionText(document.body.innerText.slice(0, 20000));
+    const sourceEl = articleBody || document.body;
+    let cleanContent = '';
+    if (sourceEl) {
+      const clone = typeof sourceEl.cloneNode === 'function' ? sourceEl.cloneNode(true) : null;
+      if (clone) {
+        this.stripAdsFromElement(clone);
+        cleanContent = this.cleanSectionText(clone.innerText || clone.textContent || '');
+      } else {
+        cleanContent = this.cleanSectionText(sourceEl.innerText || sourceEl.textContent || '');
+      }
+    }
 
     return {
       isFinanceSite: true,
@@ -551,8 +590,14 @@ class FinancialExtractors {
     const cleanName = decodeURIComponent(filename).replace(/[-_]/g, ' ');
     const pageTitle = (rawTitle && !rawTitle.endsWith('.pdf') && rawTitle !== cleanName) ? rawTitle : cleanName;
 
-    // Check if innerText or embedded text is present
-    const bodyText = document.body ? this.cleanSectionText(document.body.innerText) : '';
+    // Check if innerText or embedded document text is present
+    const embeddedDocs = this.extractEmbeddedDocumentsSync();
+    let bodyText = document.body ? this.cleanSectionText(document.body.innerText) : '';
+    for (const d of embeddedDocs) {
+      if (d.text && d.text.length > 50) {
+        bodyText = (bodyText ? bodyText + '\n\n' : '') + d.text;
+      }
+    }
     const isFinancial = this.isFinancialContent(bodyText, pageTitle, window.location.href);
 
     let ticker = 'PDF';
@@ -588,8 +633,10 @@ class FinancialExtractors {
       filingDate: new Date().toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }),
       periodBadge: 'PDF Document',
       headlines: [pageTitle],
+      hasEmbeddedDocuments: embeddedDocs.length > 0,
+      embeddedDocuments: embeddedDocs,
       fullText: bodyText && bodyText.length > 50
-        ? `Topic / Document: ${pageTitle}\n\nExtracted Content:\n${bodyText.slice(0, 20000)}`
+        ? `Topic / Document: ${pageTitle}\n\nExtracted Content:\n${bodyText.slice(0, 24000)}`
         : `Topic / Document: ${pageTitle} (PDF Document)\n\nURL: ${window.location.href}`,
     };
   }
@@ -606,24 +653,34 @@ class FinancialExtractors {
     const h1 = document.querySelector('article h1, main h1, h1');
     const pageHeading = h1 ? h1.innerText.trim() : (cleanTitle || 'Web Article');
 
-    // Clean body text by extracting main article container or stripping noise
+    // Extract any documents opened inside the webpage (iframes, embedded PDFs, in-page viewers, shadow DOM)
+    const embeddedDocs = this.extractEmbeddedDocumentsSync();
+    let embeddedText = '';
+    for (const doc of embeddedDocs) {
+      if (doc.text && doc.text.length > 50) {
+        embeddedText += `\n\n${doc.text}\n`;
+      }
+    }
+
+    // Clean body text by extracting main article container or stripping ads and noise
     const mainEl = document.querySelector('article, main, .article-content, .post-content, #content, .content');
     const sourceEl = mainEl || document.body;
 
-    const clone = sourceEl ? sourceEl.cloneNode(true) : null;
+    const clone = (sourceEl && typeof sourceEl.cloneNode === 'function') ? sourceEl.cloneNode(true) : null;
     if (clone) {
-      const removeSelectors = [
-        'script', 'style', 'nav', 'footer', 'header', 'noscript', 'iframe',
-        '#prospectus-root', '.cookie-banner', '.advertisement', '.ad-slot',
-        'aside', '.sidebar', '.social-share', '.comments', '#comments'
-      ];
-      removeSelectors.forEach((sel) => {
-        clone.querySelectorAll(sel).forEach((el) => el.remove());
-      });
+      this.stripAdsFromElement(clone);
+      clone.querySelectorAll('iframe').forEach((el) => el.remove());
     }
 
-    const cleanText = clone ? this.cleanSectionText(clone.innerText) : '';
-    const isFinancial = this.isFinancialContent(cleanText, rawTitle, window.location.href);
+    let cleanText = clone ? this.cleanSectionText(clone.innerText) : (sourceEl ? this.cleanSectionText(sourceEl.innerText || sourceEl.textContent || '') : '');
+    if (embeddedText) {
+      cleanText = embeddedText + '\n\n' + cleanText;
+    }
+
+    let isFinancial = this.isFinancialContent(cleanText, rawTitle, window.location.href);
+    if (!isFinancial && embeddedDocs.some((d) => d.isFinancial || (d.title && /10-k|10-q|8-k|annual report|quarterly report|filing|shareholder/i.test(d.title)))) {
+      isFinancial = true;
+    }
 
     let ticker = 'PAGE';
     let company = pageHeading.slice(0, 60);
@@ -645,6 +702,26 @@ class FinancialExtractors {
       }
     }
 
+    // Detect ticker, company, and formType from embedded documents or cleanText
+    const tickerMatch = cleanText.match(/(?:Ticker Symbol|Ticker|Symbol)[\s:]+([A-Z]{1,5})(?:\s*\(([A-Z]+)\))?/i);
+    if (tickerMatch && tickerMatch[1] && ticker === 'PAGE') {
+      ticker = tickerMatch[1].toUpperCase().trim();
+      if (tickerMatch[2]) exchange = tickerMatch[2].toUpperCase().trim();
+    }
+    const compMatch = cleanText.match(/(?:Company Name|Entity Name|Registrant Name|EXACT NAME OF REGISTRANT)[\s:]+([^\n\r]+)/i);
+    if (compMatch && compMatch[1] && (company === pageHeading.slice(0, 60) || company.includes('Document') || company.includes('Portal') || company.includes('Viewer'))) {
+      const cleanComp = compMatch[1].replace(/Commission File Number.*/i, '').trim();
+      if (cleanComp && cleanComp.length > 2 && !cleanComp.includes('EDGAR')) {
+        company = cleanComp;
+      }
+    }
+
+    let formType = isFinancial ? 'Article / Report' : 'General Document';
+    const combinedDocSources = `${cleanText} ${embeddedDocs.map((d) => d.title || '').join(' ')}`;
+    if (combinedDocSources.includes('FORM 10-K') || combinedDocSources.includes('10-K')) formType = '10-K';
+    else if (combinedDocSources.includes('FORM 10-Q') || combinedDocSources.includes('10-Q')) formType = '10-Q';
+    else if (combinedDocSources.includes('FORM 8-K') || combinedDocSources.includes('8-K')) formType = '8-K';
+
     return {
       isFinanceSite: isFinancial,
       isReportPage: isFinancial,
@@ -653,20 +730,388 @@ class FinancialExtractors {
       company,
       exchange,
       sector: isFinancial ? 'Financial Analysis' : 'General Webpage',
-      formType: isFinancial ? 'Article / Report' : 'General Document',
+      formType,
       filingDate: new Date().toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }),
-      periodBadge: isFinancial ? `${ticker !== 'PAGE' ? ticker + ' · ' : ''}Financial Article` : 'General Page',
+      periodBadge: isFinancial ? `${ticker !== 'PAGE' ? ticker + ' · ' : ''}${formType}` : 'General Page',
       headlines: [pageHeading],
-      fullText: `Topic / Headline: ${pageHeading}\n\nContent:\n${cleanText.slice(0, 18000)}`,
+      hasEmbeddedDocuments: embeddedDocs.length > 0,
+      embeddedDocuments: embeddedDocs,
+      fullText: `Topic / Headline: ${pageHeading}\n\nContent:\n${cleanText.slice(0, 24000)}`,
     };
   }
 
   /**
-   * Helper to strip boilerplate headers, excessive whitespace, and repetitive table markers
+   * Deep extraction of documents opened inside the webpage:
+   * - <iframe> documents (same-origin DOM or cross-origin URLs)
+   * - <embed> and <object> documents (PDFs, reports)
+   * - In-page PDF text layers (.textLayer, .pdfViewer, .pdf-page-sheet)
+   * - Custom web component document readers (Shadow DOM)
+   */
+  static extractEmbeddedDocumentsSync() {
+    const docs = [];
+
+    // 1. Check all <iframe> elements on the page
+    try {
+      const iframes = Array.from(document.querySelectorAll('iframe'));
+      for (const iframe of iframes) {
+        if (iframe.id === 'prospectus-sidebar-iframe' || (iframe.closest && iframe.closest('#prospectus-root'))) {
+          continue;
+        }
+
+        // Exclude advertising, tracking pixels, analytics, and promo widget iframes
+        const src = (iframe.src || '').toLowerCase();
+        const id = (iframe.id || '').toLowerCase();
+        const className = (iframe.className || '').toLowerCase();
+
+        // Check if iframe dimensions indicate a tracking pixel or hidden ad frame
+        try {
+          const w = iframe.width || iframe.offsetWidth;
+          const h = iframe.height || iframe.offsetHeight;
+          if ((w !== undefined && w <= 1 && w > 0) || (h !== undefined && h <= 1 && h > 0)) {
+            continue;
+          }
+        } catch (e) {}
+
+        const adKeywords = [
+          'googleads', 'doubleclick', 'pagead', 'googlesyndication', 'adnxs', 'adsystem',
+          'advertising', 'outbrain', 'taboola', 'criteo', 'revcontent', 'media.net',
+          'mgid', 'zedo', 'adroll', 'rubiconproject', 'pubmatic', 'openx', 'smartadserver',
+          'adtech', 'amazon-adsystem', 'bidswitch', 'casalemedia', 'appnexus',
+          'scorecardresearch', 'moatads', 'yieldmo', 'chartbeat', 'quantserve',
+          'facebook', 'twitter', 'disqus', 'recaptcha', 'ad-', 'ads-', 'advert',
+          'sponsored', 'promoted', 'banner-ad', 'dfp', 'trc_related'
+        ];
+        if (adKeywords.some((kw) => src.includes(kw) || id.includes(kw) || className.includes(kw))) {
+          continue;
+        }
+
+        let docText = '';
+        let docTitle = iframe.title || iframe.getAttribute('name') || '';
+
+        // Try reading contentDocument (if same-origin / accessible)
+        try {
+          const iDoc = iframe.contentDocument || iframe.contentWindow?.document;
+          if (iDoc && iDoc.body) {
+            // Check for in-iframe PDF.js text layer first
+            const textLayers = (typeof iDoc.querySelectorAll === 'function')
+              ? iDoc.querySelectorAll('.textLayer, .pdfViewer, .page, div[data-page-number]')
+              : [];
+            if (textLayers.length > 0) {
+              const pageTexts = [];
+              textLayers.forEach((layer) => {
+                const spans = Array.from(layer.querySelectorAll('span, div, p'));
+                if (spans.length > 0) {
+                  pageTexts.push(spans.map((s) => s.innerText || s.textContent || '').join(' '));
+                } else if (layer.innerText) {
+                  pageTexts.push(layer.innerText);
+                }
+              });
+              const combined = pageTexts.join('\n\n').trim();
+              if (combined.length > 50) docText = combined;
+            }
+
+            if (!docText) {
+              const clone = (iDoc.body && typeof iDoc.body.cloneNode === 'function') ? iDoc.body.cloneNode(true) : null;
+              if (clone) {
+                this.stripAdsFromElement(clone);
+                docText = this.cleanSectionText(clone.innerText || clone.textContent || '');
+              } else if (iDoc.body) {
+                docText = this.cleanSectionText(iDoc.body.innerText || iDoc.body.textContent || '');
+              }
+            }
+
+            if (!docTitle && iDoc.title) {
+              docTitle = iDoc.title;
+            }
+          }
+        } catch (crossOriginErr) {
+          // Cross-origin iframe
+        }
+
+        if (docText && docText.length > 60) {
+          docs.push({
+            type: 'iframe_document',
+            title: docTitle || 'Embedded Document',
+            url: iframe.src || window.location.href,
+            text: docText,
+            isFinancial: this.isFinancialContent(docText, docTitle, iframe.src || ''),
+          });
+        } else if (src && (src.includes('.pdf') || src.includes('/ix?doc=') || src.includes('.htm') || src.includes('doc=') || src.includes('file='))) {
+          docs.push({
+            type: src.includes('.pdf') ? 'embedded_pdf_url' : 'embedded_doc_url',
+            title: docTitle || 'Embedded Document',
+            url: iframe.src,
+            text: '',
+            isFinancial: true,
+          });
+        }
+      }
+    } catch (e) {}
+
+    // 2. Check <embed> and <object> elements (PDFs, embedded reports)
+    try {
+      const embeds = Array.from(document.querySelectorAll('embed, object'));
+      for (const el of embeds) {
+        if (el.closest && el.closest('#prospectus-root')) continue;
+        const src = el.src || el.getAttribute('data') || '';
+        const type = (el.type || el.getAttribute('type') || '').toLowerCase();
+        if (src && (type.includes('pdf') || src.toLowerCase().includes('.pdf'))) {
+          docs.push({
+            type: 'embedded_pdf_url',
+            title: el.getAttribute('title') || 'Embedded PDF Document',
+            url: src,
+            text: '',
+            isFinancial: true,
+          });
+        }
+      }
+    } catch (e) {}
+
+    // 3. In-page PDF.js / textLayer viewers in main DOM
+    try {
+      const textLayers = document.querySelectorAll('.textLayer, .pdfViewer, .pdf-page-sheet, div[data-page-number]');
+      if (textLayers.length > 0) {
+        const pageTexts = [];
+        textLayers.forEach((layer) => {
+          const spans = Array.from(layer.querySelectorAll('span, div, p'));
+          if (spans.length > 0) {
+            pageTexts.push(spans.map((s) => s.innerText || s.textContent || '').join(' '));
+          } else if (layer.innerText) {
+            pageTexts.push(layer.innerText);
+          }
+        });
+        const combined = pageTexts.join('\n\n').trim();
+        if (combined.length > 60) {
+          docs.push({
+            type: 'pdf_text_layer',
+            title: document.title || 'In-Page Document',
+            url: window.location.href,
+            text: combined,
+            isFinancial: this.isFinancialContent(combined, document.title, window.location.href),
+          });
+        }
+      }
+    } catch (e) {}
+
+    // 4. Custom web components / readers in Shadow DOM
+    try {
+      const allEls = document.querySelectorAll('*');
+      for (const el of allEls) {
+        if (el.id === 'prospectus-root' || (el.closest && el.closest('#prospectus-root'))) continue;
+        if (el.shadowRoot) {
+          const sText = el.shadowRoot.innerText || el.shadowRoot.textContent || '';
+          if (sText.length > 200) {
+            docs.push({
+              type: 'shadow_dom_document',
+              title: el.tagName.toLowerCase().replace(/[-_]/g, ' '),
+              url: window.location.href,
+              text: this.cleanSectionText(sText),
+              isFinancial: this.isFinancialContent(sText, '', window.location.href),
+            });
+          }
+        }
+      }
+    } catch (e) {}
+
+    return docs;
+  }
+
+  /**
+   * Deep asynchronous document extraction for all documents opened inside the webpage:
+   * - Traverses iframes, embed/object tags, in-page PDF viewers, and shadow DOM
+   * - If an iframe or embed is cross-origin or local file, fetches the document via
+   *   extension permissions or background proxy (FETCH_PROXY / FETCH_PDF_TEXT)
+   * - Parses HTML or PDF streams and extracts full text & high-signal financial sections
+   */
+  static async extractEmbeddedDocumentsAsync() {
+    const docs = this.extractEmbeddedDocumentsSync();
+
+    for (const doc of docs) {
+      if ((!doc.text || doc.text.length < 50) && doc.url) {
+        try {
+          const lowerUrl = doc.url.toLowerCase();
+
+          if (lowerUrl.includes('.pdf')) {
+            let pdfText = '';
+            if (typeof window.ProspectusPDFExtractor !== 'undefined' || typeof PDFExtractor !== 'undefined') {
+              const ext = window.ProspectusPDFExtractor || PDFExtractor;
+              pdfText = await ext.extractFromUrl(doc.url);
+            }
+            if (!pdfText && typeof chrome !== 'undefined' && chrome.runtime?.sendMessage) {
+              const bgRes = await new Promise((resolve) => {
+                chrome.runtime.sendMessage({ action: 'FETCH_PDF_TEXT', url: doc.url }, (r) => {
+                  if (chrome.runtime.lastError) return resolve(null);
+                  resolve(r);
+                });
+              });
+              if (bgRes && bgRes.success && bgRes.text) pdfText = bgRes.text;
+            }
+            if (pdfText && pdfText.trim().length > 30) {
+              doc.text = pdfText.trim();
+              doc.isFinancial = this.isFinancialContent(pdfText, doc.title, doc.url);
+            }
+          } else {
+            let htmlText = '';
+            try {
+              const res = await fetch(doc.url);
+              if (res.ok) htmlText = await res.text();
+            } catch (fetchErr) {
+              if (typeof chrome !== 'undefined' && chrome.runtime?.sendMessage) {
+                const bgRes = await new Promise((resolve) => {
+                  chrome.runtime.sendMessage({ action: 'FETCH_PROXY', url: doc.url }, (r) => {
+                    if (chrome.runtime.lastError) return resolve(null);
+                    resolve(r);
+                  });
+                });
+                if (bgRes && bgRes.success && bgRes.text) htmlText = bgRes.text;
+              }
+            }
+
+            if (htmlText && htmlText.length > 50) {
+              const parser = new DOMParser();
+              const parsedDoc = parser.parseFromString(htmlText, 'text/html');
+              this.stripAdsFromElement(parsedDoc.body || parsedDoc);
+              const extractedText = this.cleanSectionText(parsedDoc.body ? parsedDoc.body.innerText : '');
+
+              if (extractedText.length > 50) {
+                doc.text = extractedText;
+                doc.title = doc.title || (parsedDoc.title ? parsedDoc.title.trim() : 'Embedded Document');
+                doc.isFinancial = this.isFinancialContent(extractedText, doc.title, doc.url);
+
+                // Detect SEC filings sections inside the embedded document
+                if (extractedText.includes('10-K') || extractedText.includes('10-Q') || extractedText.includes('8-K') || extractedText.includes('Item 1A') || extractedText.includes('Risk Factors')) {
+                  const riskMatch = extractedText.match(/Item\s+1A[\.\s–-]+Risk\s+Factors([\s\S]{300,30000}?)(?:Item\s+(?:1B|2|3|4|7)\b|$)/i);
+                  if (riskMatch && riskMatch[1]) doc.riskFactorsText = this.cleanSectionText(riskMatch[1]);
+
+                  const mdaMatch = extractedText.match(/Item\s+(?:7|2)[\.\s–-]+Management(?:'s)?\s+Discussion([\s\S]{300,30000}?)(?:Item\s+(?:7A|8|3)\b|$)/i);
+                  if (mdaMatch && mdaMatch[1]) doc.mdaText = this.cleanSectionText(mdaMatch[1]);
+
+                  const bizMatch = extractedText.match(/Item\s+1[\.\s–-]+Business([\s\S]{300,20000}?)(?:Item\s+1A\b|$)/i);
+                  if (bizMatch && bizMatch[1]) doc.businessText = this.cleanSectionText(bizMatch[1]);
+
+                  const tickerMatch = extractedText.match(/(?:Ticker Symbol|Ticker|Symbol)[\s:]+([A-Z]{1,5})(?:\s*\(([A-Z]+)\))?/i);
+                  if (tickerMatch && tickerMatch[1]) doc.ticker = tickerMatch[1].toUpperCase().trim();
+
+                  const compMatch = extractedText.match(/(?:Company Name|Entity Name|Registrant Name|EXACT NAME OF REGISTRANT)[\s:]+([^\n\r]+)/i);
+                  if (compMatch && compMatch[1]) doc.company = compMatch[1].replace(/Commission File Number.*/i, '').trim();
+                }
+              }
+            }
+          }
+        } catch (e) {
+          console.warn('Prospectus: extractEmbeddedDocumentsAsync error for', doc.url, e);
+        }
+      }
+    }
+
+    return docs;
+  }
+
+  /**
+   * Complete selector registry for advertisements, sponsored containers, promo banners, and marketing widgets
+   */
+  static AD_SELECTORS = [
+    'script', 'style', 'nav', 'footer', 'header', 'noscript',
+    '#prospectus-root', 'ins.adsbygoogle', '.adsbygoogle',
+    '.ad', '.ads', '.advert', '.advertisement', '.advertising',
+    '.ad-slot', '.ad-slots', '.ad-banner', '.ad-wrapper', '.ad-container', '.ad-box', '.ad-unit',
+    '.ad-holder', '.ad-placement', '.ad-zone', '.ad-card', '.ad-module', '.ad-wrapper-desktop',
+    '.banner-ad', '.sidebar-ad', '.top-ad', '.bottom-ad', '.inline-ad', '.content-ad',
+    '[class*="ad-slot"]', '[class*="ad-banner"]', '[class*="ad-container"]', '[class*="advertisement"]',
+    '[id*="ad-slot"]', '[id*="ad-banner"]', '[id*="ad-container"]', '[id*="advertisement"]',
+    '[id*="google_ads"]', '[id*="div-gpt-ad"]', '[class*="dfp-"]', '[id*="dfp-"]',
+    '[class*="taboola"]', '[id*="taboola"]', '.trc_related_container', '.trc_rbox_container',
+    '[class*="outbrain"]', '[id*="outbrain"]', '.OUTBRAIN',
+    '[class*="revcontent"]', '[id*="revcontent"]',
+    '[class*="zergnet"]', '[id*="zergnet"]',
+    '[class*="criteo"]', '[id*="criteo"]',
+    '.mgid', '.pubmatic', '.rubicon', '.amazon-ad',
+    '.sponsored', '.sponsored-content', '.sponsored-post', '.sponsored-article',
+    '.promoted', '.promoted-content', '.promoted-post', '.paid-content', '.native-ad',
+    '[data-ad]', '[data-ad-unit]', '[data-ad-client]', '[data-ad-slot]', '[data-google-query-id]',
+    '.newsletter', '.newsletter-signup', '.newsletter-box', '.subscribe-banner',
+    '.subscription-prompt', '.paywall-prompt', '.promo-banner', '.promo-box',
+    '.interstitial', '.outstream', '.commercial',
+    '.cookie-banner', '.cookie-notice', '.cookie-consent', '.consent-banner',
+    '.onetrust-consent-sdk', '#onetrust-banner-sdk', '.qc-cmp-ui-container',
+    'aside', '.sidebar', '.social-share', '.share-buttons', '.social-bar', '.comments', '#comments', '.disqus'
+  ];
+
+  /**
+   * Recursively strips advertisement elements and commercial widgets from a DOM element
+   */
+  static stripAdsFromElement(root) {
+    if (!root || typeof root.querySelectorAll !== 'function') return root;
+    for (const sel of this.AD_SELECTORS) {
+      try {
+        root.querySelectorAll(sel).forEach((el) => {
+          if (el.id === 'prospectus-root' || (el.closest && el.closest('#prospectus-root'))) return;
+          el.remove();
+        });
+      } catch (e) {}
+    }
+    return root;
+  }
+
+  /**
+   * Filters out standalone promotional labels, ad disclaimers, and marketing boilerplate from text
+   */
+  static stripAdText(text) {
+    if (!text) return '';
+    const adLinePatterns = [
+      /^\s*(?:advertisement|advertisements|sponsored|sponsored content|promoted stories|promoted content|paid partner content|partner content)[\s:–-]*$/i,
+      /^\s*(?:adchoices|ad choices|report (?:this )?ad|advertisement continued below)[\s:–-]*$/i,
+      /^\s*(?:recommended for you|you may also like|trending stories|trending news|around the web)[\s:–-]*$/i,
+      /^\s*(?:subscribe now for unlimited access|sign up for our free newsletter|click here to subscribe|subscribe to continue reading)[\s:–-]*$/i,
+      /^\s*(?:we use cookies to improve your experience|accept all cookies|cookie policy|manage consent|we value your privacy)[\s:–-]*$/i,
+      /^\s*(?:this article contains affiliate links|we may earn an affiliate commission)[\s:–-]*$/i,
+      /^\s*share this (?:article|story) on (?:facebook|twitter|x|linkedin)[\s:–-]*$/i,
+    ];
+
+    const lines = text.split('\n');
+    const cleanLines = [];
+    let skippingAdBlock = false;
+
+    for (const line of lines) {
+      const trimmed = line.trim();
+      if (!trimmed) {
+        cleanLines.push('');
+        continue;
+      }
+
+      // Check if line is an ad banner or header
+      if (/^\s*(?:advertisement|sponsored content|promoted stories|ad choices|adchoices)[\s:–-]*$/i.test(trimmed)) {
+        skippingAdBlock = true;
+        continue;
+      }
+
+      // Check other ad patterns
+      if (adLinePatterns.some((pattern) => pattern.test(trimmed))) {
+        continue;
+      }
+
+      // Stop skipping ad block if we hit a substantive sentence or financial disclosure
+      if (skippingAdBlock) {
+        if (trimmed.length > 70 || /^(?:item\s+\d|revenue|net income|operating|the company|in fiscal|sales|guidance|risk factors|balance sheet)/i.test(trimmed)) {
+          skippingAdBlock = false;
+          cleanLines.push(line);
+        }
+        continue;
+      }
+
+      cleanLines.push(line);
+    }
+
+    return cleanLines.join('\n');
+  }
+
+  /**
+   * Helper to strip advertisements, boilerplate headers, excessive whitespace, and repetitive table markers
    */
   static cleanSectionText(text) {
     if (!text) return '';
-    return text
+    const withoutAds = this.stripAdText(text);
+    return withoutAds
       .replace(/\r\n/g, '\n')
       .replace(/\t/g, ' ')
       .replace(/[ \t]{2,}/g, ' ')
