@@ -59,7 +59,7 @@ if (typeof ALL_US_STOCKS === 'undefined' && typeof require !== 'undefined') {
   try {
     const { ALL_US_STOCKS: loaded } = require('./us-stocks.js');
     if (loaded) globalThis.ALL_US_STOCKS = loaded;
-  } catch (e) {}
+  } catch (e) { }
 }
 
 class WatchlistService {
@@ -125,7 +125,7 @@ class WatchlistService {
     });
 
     if (modified && this.storage.saveWatchlist) {
-      this.storage.saveWatchlist(sanitized).catch(() => {});
+      this.storage.saveWatchlist(sanitized).catch(() => { });
     }
 
     return sanitized;
@@ -262,7 +262,7 @@ class WatchlistService {
             }
           }
         }
-      } catch (e) {}
+      } catch (e) { }
     }
 
     // Sort: highest score first, then shorter ticker, then alphabetical
@@ -277,7 +277,7 @@ class WatchlistService {
   async searchLiveAmericanStocks(query) {
     const cleanQ = encodeURIComponent(query.trim());
     const url = `https://query2.finance.yahoo.com/v1/finance/search?q=${cleanQ}&quotesCount=6&newsCount=0&enableFuzzyQuery=false`;
-    
+
     let resData = null;
     if (typeof chrome !== 'undefined' && chrome.runtime && chrome.runtime.id && chrome.runtime.sendMessage) {
       try {
@@ -285,14 +285,14 @@ class WatchlistService {
           chrome.runtime.sendMessage({ action: 'FETCH_PROXY', url, options: { timeout: 3500 } }, (r) => resolve(r));
         });
         if (res && res.data) resData = res.data;
-      } catch (e) {}
+      } catch (e) { }
     }
 
     if (!resData && typeof fetch !== 'undefined') {
       try {
         const r = await fetch(url);
         if (r.ok) resData = await r.json();
-      } catch (e) {}
+      } catch (e) { }
     }
 
     if (resData && Array.isArray(resData.quotes)) {
@@ -345,7 +345,7 @@ class WatchlistService {
           return String(sec_company_tickers[clean]).padStart(10, '0');
         }
       }
-    } catch (e) {}
+    } catch (e) { }
 
     return '';
   }
@@ -639,7 +639,7 @@ class WatchlistService {
               }
             });
             if (res && res.data) secData = res.data;
-          } catch (e) {}
+          } catch (e) { }
         }
 
         if (secData && secData.filings && secData.filings.recent) {
@@ -691,7 +691,7 @@ class WatchlistService {
     for (let i = 0; i < rawList.length; i++) {
       const raw = rawList[i];
       const item = typeof raw === 'string' ? { ticker: raw, company: raw, starred: false, muted: false } : { ...raw };
-      
+
       const prevLastChecked = item.lastChecked || 0;
       const prevFilingSig = item.lastFilingSignature || (item.lastSeenFilingDate ? `FILING_${item.lastSeenFilingDate}` : '');
       const prevNewsSig = item.lastNewsSignature || '';
@@ -706,7 +706,7 @@ class WatchlistService {
 
         if (secRes.hasFiling && secRes.filingDate) {
           currentFilingSig = `${secRes.form}_${secRes.filingDate}_${secRes.url || ''}`;
-          
+
           if (prevFilingSig) {
             // New ONLY if the latest filing signature changed from the previous check
             isNewFilingSinceLastCheck = currentFilingSig !== prevFilingSig;
@@ -742,7 +742,7 @@ class WatchlistService {
             item.lastNewsSignature = currentNewsSig;
             item.lastSeenNewsTimestamp = topNews.timestamp;
           }
-        } catch (nErr) {}
+        } catch (nErr) { }
 
         // Evaluate overall state for this stock from the last check
         const hasNewFilings = isNewFilingSinceLastCheck;
@@ -791,7 +791,7 @@ class WatchlistService {
         try {
           const freshQuote = await this.getDailyStockQuote(item.ticker, true);
           if (freshQuote) item.stockQuote = freshQuote;
-        } catch (qErr) {}
+        } catch (qErr) { }
 
         item.lastChecked = Date.now();
       } catch (tickerErr) {
@@ -1100,11 +1100,11 @@ class WatchlistService {
           if (response.text) {
             try {
               return JSON.parse(response.text);
-            } catch (e) {}
+            } catch (e) { }
           }
         }
       }
-    } catch (err) {}
+    } catch (err) { }
 
     return null;
   }
@@ -1122,7 +1122,7 @@ class WatchlistService {
       if (res && res.ok) {
         return await res.text();
       }
-    } catch (e) {}
+    } catch (e) { }
 
     // 2. Background proxy fetch (bypasses CORS via service worker)
     try {
@@ -1166,7 +1166,7 @@ class WatchlistService {
           if (typeof response.data === 'string') return response.data;
         }
       }
-    } catch (err) {}
+    } catch (err) { }
 
     return null;
   }
@@ -1188,8 +1188,8 @@ class WatchlistService {
     // 1. Check known popular company database
     const found = POPULAR_COMPANIES.find(
       (c) => c.ticker === cleanTicker ||
-             c.ticker === cleanTicker.replace('.', '-') ||
-             c.ticker === cleanTicker.replace('-', '.')
+        c.ticker === cleanTicker.replace('.', '-') ||
+        c.ticker === cleanTicker.replace('-', '.')
     );
     if (found) {
       const quote = await this.getDailyStockQuote(found.ticker);
@@ -1227,7 +1227,7 @@ class WatchlistService {
         if (searchRes && Array.isArray(searchRes.quotes) && searchRes.quotes[0] && (searchRes.quotes[0].shortname || searchRes.quotes[0].longname)) {
           resolvedCompany = searchRes.quotes[0].shortname || searchRes.quotes[0].longname;
         }
-      } catch (e) {}
+      } catch (e) { }
 
       return {
         valid: true,
@@ -1245,8 +1245,8 @@ class WatchlistService {
       if (searchRes && Array.isArray(searchRes.quotes) && searchRes.quotes.length > 0) {
         const exact = searchRes.quotes.find(
           (q) => (q.symbol || '').toUpperCase() === yahooSym ||
-                 (q.symbol || '').toUpperCase() === cleanTicker ||
-                 (q.symbol || '').toUpperCase().replace('-', '.') === cleanTicker
+            (q.symbol || '').toUpperCase() === cleanTicker ||
+            (q.symbol || '').toUpperCase().replace('-', '.') === cleanTicker
         );
         if (exact) {
           return {
@@ -1257,7 +1257,7 @@ class WatchlistService {
           };
         }
       }
-    } catch (e) {}
+    } catch (e) { }
 
     return {
       valid: false,
@@ -1293,7 +1293,7 @@ class WatchlistService {
             return data;
           }
         }
-      } catch (e) {}
+      } catch (e) { }
     }
 
     // 2. Query live Yahoo Finance Chart API (query1 with failover to query2)
@@ -1343,7 +1343,7 @@ class WatchlistService {
               if (typeof chrome !== 'undefined' && chrome.storage && chrome.storage.local) {
                 await chrome.storage.local.set({ [cacheKey]: quoteObj });
               }
-            } catch (e) {}
+            } catch (e) { }
             return quoteObj;
           }
         }
@@ -1434,7 +1434,7 @@ class WatchlistService {
             return data;
           }
         }
-      } catch (e) {}
+      } catch (e) { }
     }
 
     const isYear = normRange === '1y';
@@ -1553,7 +1553,7 @@ class WatchlistService {
               if (typeof chrome !== 'undefined' && chrome.storage && chrome.storage.local) {
                 await chrome.storage.local.set({ [cacheKey]: historyObj });
               }
-            } catch (e) {}
+            } catch (e) { }
             return historyObj;
           }
         }
@@ -1669,7 +1669,7 @@ class WatchlistService {
           return data.articles;
         }
       }
-    } catch (e) {}
+    } catch (e) { }
 
     const now = Date.now();
     const queryTicker = this.toYahooSymbol(cleanTicker);
@@ -1737,7 +1737,7 @@ class WatchlistService {
           });
           if (results.length > 0) return results;
         }
-      } catch (e) {}
+      } catch (e) { }
 
       // Regex fallback
       const itemMatches = xmlText.match(/<item>[\s\S]*?<\/item>/g) || [];
@@ -1795,7 +1795,7 @@ class WatchlistService {
                   return formatNewsItem(n.title, n.publisher || 'Yahoo Finance', n.link, pubTime);
                 });
             }
-          } catch (e) {}
+          } catch (e) { }
         }
         return [];
       })(),
@@ -1833,7 +1833,7 @@ class WatchlistService {
         if (typeof chrome !== 'undefined' && chrome.storage && chrome.storage.local) {
           await chrome.storage.local.set({ [cacheKey]: { timestamp: Date.now(), articles: uniqueArticles } });
         }
-      } catch (e) {}
+      } catch (e) { }
       return uniqueArticles;
     }
 
@@ -1903,7 +1903,7 @@ class WatchlistService {
               );
             });
             if (res && res.data) secData = res.data;
-          } catch (e) {}
+          } catch (e) { }
         }
 
         if (secData && secData.filings && secData.filings.recent) {
@@ -1952,7 +1952,7 @@ class WatchlistService {
             return filingsList;
           }
         }
-      } catch (err) {}
+      } catch (err) { }
     }
 
     // Dynamic recent baseline filings (never 2-year-old dates)
