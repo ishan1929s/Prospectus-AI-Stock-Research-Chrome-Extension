@@ -23,6 +23,23 @@ document.addEventListener('DOMContentLoaded', async () => {
   let showToast = () => {};
   let showPersistentStatus = () => {};
 
+  const getStockCurrencySymbol = (stockOrQuote, ticker = '') => {
+    if (stockOrQuote?.currencySymbol) return stockOrQuote.currencySymbol;
+    if (watchlistService && typeof watchlistService.getCurrencySymbol === 'function') {
+      return watchlistService.getCurrencySymbol(stockOrQuote?.currency, ticker || stockOrQuote?.ticker, stockOrQuote?.exchange);
+    }
+    const curr = String(stockOrQuote?.currency || '').toUpperCase();
+    if (curr === 'INR' || curr === '₹') return '₹';
+    if (curr === 'EUR' || curr === '€') return '€';
+    if (curr === 'GBP' || curr === '£') return '£';
+    if (curr === 'JPY' || curr === 'CNY' || curr === '¥') return '¥';
+    if (curr === 'CAD') return 'CA$';
+    if (curr === 'AUD') return 'A$';
+    const t = String(ticker || stockOrQuote?.ticker || '').toUpperCase();
+    if (t.endsWith('.NS') || t.endsWith('.BO') || t.startsWith('NSE:') || t.startsWith('BSE:')) return '₹';
+    return '$';
+  };
+
   // Silence all console.warn and console.error within Prospectus sidepanel context
   // to guarantee Chrome never logs runtime error/warning badges in chrome://extensions
   if (typeof console !== 'undefined') {
@@ -812,6 +829,30 @@ document.addEventListener('DOMContentLoaded', async () => {
       ? watchlistService.render1YearStockTrendHTML(history1Y, primaryStock.company)
       : '';
 
+    const meter = res.meter || (ai ? ai.extractDynamicFallbackMeter(pageData) : {
+      title: 'Document Assessment Meter',
+      score: res.toneScore ?? 50,
+      label: res.toneLabel || 'Balanced Assessment',
+      leftLabel: 'Defensive',
+      centerLabel: 'Balanced',
+      rightLabel: 'Expansionary',
+      explanation: 'Assessed from extracted financial statements and stated operational disclosures.'
+    });
+
+    const keyMetrics = Array.isArray(res.keyMetrics) && res.keyMetrics.length > 0 
+      ? res.keyMetrics 
+      : (ai ? ai.extractDynamicKeyMetrics({ text: pageData?.fullText, company: pageData?.company, ticker: pageData?.ticker, formType: pageData?.formType }) : []);
+
+    const developments = Array.isArray(res.developments) && res.developments.length > 0 
+      ? res.developments 
+      : (ai ? ai.extractDynamicDevelopments({ text: pageData?.fullText, company: pageData?.company, ticker: pageData?.ticker, formType: pageData?.formType, bullets: res.bullets }) : []);
+
+    const patterns = Array.isArray(res.patterns) && res.patterns.length > 0 
+      ? res.patterns 
+      : (ai ? ai.extractDynamicPatterns({ text: pageData?.fullText, company: pageData?.company, ticker: pageData?.ticker, formType: pageData?.formType, bullets: res.bullets, metrics: keyMetrics }) : []);
+
+    const whatChanged = Array.isArray(res.whatChanged) && res.whatChanged.length > 0 ? res.whatChanged : [];
+
     container.innerHTML = `
       ${
         activeFilingContext
@@ -835,7 +876,6 @@ document.addEventListener('DOMContentLoaded', async () => {
         <button class="coral-btn" id="btn-sp-reanalyze" style="font-size: 11px; padding: 4px 8px;">Re-analyze</button>
       </div>
 
-
       <!-- Executive Overview -->
       <div class="summary-page-overview-box">
         <div class="overview-box-header">
@@ -846,40 +886,127 @@ document.addEventListener('DOMContentLoaded', async () => {
         </p>
       </div>
 
+      <!-- Key Financial & Quantitative Metrics Grid -->
+      ${keyMetrics && keyMetrics.length > 0 ? `
+        <div class="summary-kpi-grid">
+          ${keyMetrics.map(m => `
+            <div class="summary-kpi-card">
+              <span class="summary-kpi-label">${escapeHTML(m.label)}</span>
+              <div class="summary-kpi-val-row">
+                <span class="summary-kpi-value">${escapeHTML(m.value)}</span>
+                ${m.delta ? `<span class="summary-kpi-delta ${m.isPositive ? 'positive' : (String(m.delta).includes('-') ? 'negative' : 'neutral')}">${escapeHTML(m.delta)}</span>` : ''}
+              </div>
+            </div>
+          `).join('')}
+        </div>
+      ` : ''}
+
       <!-- 1-Year Stock Price Trend Graph -->
       ${trendGraphHTML}
 
-      <!-- Assessment Meter -->
-      <div class="sentiment-container">
-        <div class="sentiment-header">
-          <span class="sentiment-title">✦ Assessment Meter</span>
-          <span class="sentiment-label">${res.meter?.label || 'Balanced Assessment'} (${res.meter?.score ?? 50}/100)</span>
+      <!-- Strategic & Operational Developments Card -->
+      ${developments && developments.length > 0 ? `
+        <div class="summary-developments-card">
+          <div class="summary-developments-header">
+            <span class="summary-developments-title">
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="23 6 13.5 15.5 8.5 10.5 1 18"></polyline><polyline points="17 6 23 6 23 12"></polyline></svg>
+              Strategic & Operational Developments
+            </span>
+          </div>
+          <div class="summary-dev-list">
+            ${developments.map(d => {
+              let str = String(d || '').trim();
+              str = str.replace(/^[•\u2022\u00B7\-–—]\s*/, '').replace(/^\*\s+/, '').trim();
+              str = str.replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>');
+              return `<div class="summary-dev-item">${str}</div>`;
+            }).join('')}
+          </div>
         </div>
-        <div class="sentiment-track">
-          <div class="sentiment-fill" style="width: ${res.meter?.score ?? 50}%"></div>
+      ` : ''}
+
+      <!-- Key Insights & Pattern Recognition Card -->
+      ${patterns && patterns.length > 0 ? `
+        <div class="summary-insights-card">
+          <div class="summary-insights-header">
+            <span class="summary-insights-title">
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"></path><polyline points="3.27 6.96 12 12.01 20.73 6.96"></polyline><line x1="12" y1="22.08" x2="12" y2="12"></line></svg>
+              Insights & Pattern Recognition
+            </span>
+          </div>
+          <div class="summary-patterns-list">
+            ${patterns.map(p => {
+              let str = String(p || '').trim();
+              str = str.replace(/^[•\u2022\u00B7\-–—]\s*/, '').replace(/^\*\s+/, '').trim();
+              str = str.replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>');
+              return `<div class="summary-pattern-item">${str}</div>`;
+            }).join('')}
+          </div>
         </div>
-        <div class="sentiment-labels">
-          <span>${res.meter?.leftLabel || 'Defensive'}</span>
-          <span>${res.meter?.centerLabel || 'Balanced'}</span>
-          <span>${res.meter?.rightLabel || 'Expansionary'}</span>
+      ` : ''}
+
+      <!-- Dynamic Contextual Assessment Meter Card (Configured by AI) -->
+      <div class="coverage-tone-card">
+        <div class="meter-header">
+          <span class="meter-title">${meter.title || 'Document Assessment'}</span>
+          <span class="meter-label" id="sp-meter-label-text">${meter.label || 'Overview'}</span>
         </div>
-        <div class="sentiment-explanation">
-          ${res.meter?.explanation || 'Based on key statements and financial disclosures extracted from the document.'}
+        <div class="meter-track-container">
+          <div class="meter-bar">
+            <div class="meter-tick" style="left: ${Math.min(95, Math.max(5, meter.score ?? 50))}%;"></div>
+          </div>
+          <div class="meter-labels">
+            <span>${meter.leftLabel || 'Defensive'}</span>
+            <span>${meter.centerLabel || 'Balanced'}</span>
+            <span>${meter.rightLabel || 'Expansionary'}</span>
+          </div>
         </div>
+        <p class="meter-disclaimer">
+          ${(meter.explanation || 'Assessed from extracted financial and operational disclosures.').replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')}
+        </p>
       </div>
 
-      <!-- Section Title -->
-      <div class="key-points-header">
-        <span class="key-points-title">✦ Key Analytical Takeaways</span>
+      <!-- Key Period Shifts / What Changed Preview -->
+      ${whatChanged && whatChanged.length > 0 ? `
+        <div class="summary-shifts-preview">
+          <div class="summary-shifts-preview-header">
+            <span class="summary-shifts-preview-title">✦ Key Period Shifts</span>
+            <button type="button" class="coral-btn btn-sp-view-full-diff" style="font-size: 10.5px; padding: 2.5px 7px;">View Full Diffs ↗</button>
+          </div>
+          <div class="summary-shifts-list">
+            ${whatChanged.slice(0, 3).map(s => `
+              <div class="summary-shift-pill-item">
+                <span class="summary-shift-headline">${escapeHTML(s.headline)}</span>
+                <span class="summary-shift-badge ${s.isPositive ? 'positive' : 'negative'}">${escapeHTML(s.changePercent || (s.isPositive ? '+YoY' : '-YoY'))}</span>
+              </div>
+            `).join('')}
+          </div>
+        </div>
+      ` : ''}
+
+      <!-- Tone Tag -->
+      <div class="tone-highlight-pill" id="sp-summary-tone-pill">
+        ${res.toneTag || 'Tone: factual'}
       </div>
 
-      <!-- Bullets -->
+      <div class="summary-section-subhead">
+        <span>✦ Core Takeaways & Disclosures</span>
+      </div>
+
+      <!-- Bullets with Category Headlines & Bold Metrics -->
       <ul class="summary-bullets">
         ${(res.bullets || []).map((b) => {
           let str = String(b || '').trim();
-          str = str.replace(/^[\s•\u2022\u00B7\*\-–—]+/, '').trim();
+          str = str.replace(/^[•\u2022\u00B7\-–—]\s*/, '').replace(/^\*\s+/, '').trim();
           str = str.replace(/^[âÂ][€\u0080][¢\u00A2]\s*/, '').trim();
           str = str.replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>');
+          if (!str.startsWith('<strong>') && str.includes(':')) {
+            const colonIdx = str.indexOf(':');
+            if (colonIdx > 0 && colonIdx < 35) {
+              const head = str.slice(0, colonIdx);
+              const rest = str.slice(colonIdx + 1);
+              str = `<strong class="bullet-topic">${head}:</strong>${rest}`;
+            }
+          }
           return `<li class="bullet-item"><span class="bullet-icon">✦</span><span class="bullet-content">${str}</span></li>`;
         }).join('')}
       </ul>
@@ -912,7 +1039,7 @@ document.addEventListener('DOMContentLoaded', async () => {
                 <div class="summary-stock-right">
                   ${s.dailyQuote ? `
                     <div class="summary-stock-quote-group">
-                      <span class="summary-stock-price">$${s.dailyQuote.price}</span>
+                      <span class="summary-stock-price">${getStockCurrencySymbol(s.dailyQuote, s.ticker)}${s.dailyQuote.price}</span>
                       <span class="summary-stock-change ${s.dailyQuote.isPositive ? 'positive' : 'negative'}">
                         ${s.dailyQuote.isPositive ? '▲' : '▼'} ${s.dailyQuote.changePercent}
                       </span>
@@ -927,6 +1054,14 @@ document.addEventListener('DOMContentLoaded', async () => {
           </div>
         </div>
       ` : ''}
+
+      <div class="editorial-divider"></div>
+
+      <p class="compliance-note">
+        ${res.disclaimer || (pageData.isFinanceSite
+          ? 'Objective analytical breakdown of page disclosures and reported information. Does not constitute financial advice or investment recommendations.'
+          : 'Objective analytical summary of extracted page content. Does not constitute professional or investment advice.')}
+      </p>
     `;
 
     const reanalyzeBtn = document.getElementById('btn-sp-reanalyze');
@@ -936,6 +1071,16 @@ document.addEventListener('DOMContentLoaded', async () => {
         runSummaryAnalysis();
       });
     }
+
+    // View Full Diffs button
+    const diffBtns = container.querySelectorAll('.btn-sp-view-full-diff');
+    diffBtns.forEach((btn) => {
+      btn.addEventListener('click', () => {
+        activeTabName = 'changed';
+        renderHeader();
+        renderTabContent();
+      });
+    });
 
     // Stock tracking buttons in the summary stocks box
     container.querySelectorAll('.btn-summary-stock-track').forEach((btn) => {
@@ -1741,7 +1886,7 @@ document.addEventListener('DOMContentLoaded', async () => {
                 <div class="wl-card-price-row" id="wl-sp-price-box-${item.ticker}">
                   ${
                     quote
-                      ? `<span class="wl-card-price">$${quote.price}</span>
+                      ? `<span class="wl-card-price">${getStockCurrencySymbol(quote || item.stockQuote || item, item.ticker)}${quote.price}</span>
                          <span class="wl-card-change ${quote.isPositive ? 'positive' : 'negative'}">
                            ${quote.isPositive ? '▲' : '▼'} ${quote.changePercent}
                          </span>`
@@ -2136,7 +2281,19 @@ document.addEventListener('DOMContentLoaded', async () => {
     // Card Click to Expand / Collapse Detail Tracker
     container.querySelectorAll('.watchlist-stock-card').forEach((card) => {
       card.addEventListener('click', async (e) => {
-        if (e.target.closest('button') || e.target.closest('a') || e.target.closest('select') || e.target.closest('input')) {
+        // 1. Do not collapse if the user highlighted or selected text
+        const selection = window.getSelection();
+        if (selection && selection.toString().trim().length > 0) {
+          return;
+        }
+
+        // 2. Only expand/collapse if clicking on the main header row or explicit expand trigger
+        if (!e.target.closest('.wl-card-main-row, [data-action="toggle-expand"]')) {
+          return;
+        }
+
+        // 3. Ignore interactive controls
+        if (e.target.closest('button, a, select, input, .wl-card-source-link, .wl-star-btn, .btn-sp-mute-ticker, .btn-sp-delete-ticker')) {
           return;
         }
 
@@ -2297,8 +2454,9 @@ document.addEventListener('DOMContentLoaded', async () => {
             if (q) {
               const box = document.getElementById(`wl-sp-price-box-${it.ticker}`);
               if (box) {
+                const sym = getStockCurrencySymbol(q, it.ticker);
                 box.innerHTML = `
-                  <span class="wl-card-price">$${q.price}</span>
+                  <span class="wl-card-price">${sym}${q.price}</span>
                   <span class="wl-card-change ${q.isPositive ? 'positive' : 'negative'}">
                     ${q.isPositive ? '▲' : '▼'} ${q.changePercent}
                   </span>

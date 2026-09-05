@@ -1032,6 +1032,20 @@
         explanation: 'Assessed from extracted financial statements and stated operational disclosures.'
       });
 
+      const keyMetrics = Array.isArray(res.keyMetrics) && res.keyMetrics.length > 0 
+        ? res.keyMetrics 
+        : (this.ai ? this.ai.extractDynamicKeyMetrics({ text: this.pageData?.fullText, company: this.pageData?.company, ticker: this.pageData?.ticker, formType: this.pageData?.formType }) : []);
+
+      const developments = Array.isArray(res.developments) && res.developments.length > 0 
+        ? res.developments 
+        : (this.ai ? this.ai.extractDynamicDevelopments({ text: this.pageData?.fullText, company: this.pageData?.company, ticker: this.pageData?.ticker, formType: this.pageData?.formType, bullets: res.bullets }) : []);
+
+      const patterns = Array.isArray(res.patterns) && res.patterns.length > 0 
+        ? res.patterns 
+        : (this.ai ? this.ai.extractDynamicPatterns({ text: this.pageData?.fullText, company: this.pageData?.company, ticker: this.pageData?.ticker, formType: this.pageData?.formType, bullets: res.bullets, metrics: keyMetrics }) : []);
+
+      const whatChanged = Array.isArray(res.whatChanged) && res.whatChanged.length > 0 ? res.whatChanged : [];
+
       container.innerHTML = `
         ${
           this.activeFilingContext
@@ -1066,8 +1080,63 @@
           </p>
         </div>
 
+        <!-- Key Financial & Quantitative Metrics Grid -->
+        ${keyMetrics && keyMetrics.length > 0 ? `
+          <div class="summary-kpi-grid">
+            ${keyMetrics.map(m => `
+              <div class="summary-kpi-card">
+                <span class="summary-kpi-label">${this.escapeHTML ? this.escapeHTML(m.label) : m.label}</span>
+                <div class="summary-kpi-val-row">
+                  <span class="summary-kpi-value">${this.escapeHTML ? this.escapeHTML(m.value) : m.value}</span>
+                  ${m.delta ? `<span class="summary-kpi-delta ${m.isPositive ? 'positive' : (String(m.delta).includes('-') ? 'negative' : 'neutral')}">${this.escapeHTML ? this.escapeHTML(m.delta) : m.delta}</span>` : ''}
+                </div>
+              </div>
+            `).join('')}
+          </div>
+        ` : ''}
+
         <!-- 1-Year Stock Price Trend Graph (Displayed when researching a stock) -->
         ${trendGraphHTML}
+
+        <!-- Strategic & Operational Developments Card -->
+        ${developments && developments.length > 0 ? `
+          <div class="summary-developments-card">
+            <div class="summary-developments-header">
+              <span class="summary-developments-title">
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="23 6 13.5 15.5 8.5 10.5 1 18"></polyline><polyline points="17 6 23 6 23 12"></polyline></svg>
+                Strategic & Operational Developments
+              </span>
+            </div>
+            <div class="summary-dev-list">
+              ${developments.map(d => {
+                let str = String(d || '').trim();
+                str = str.replace(/^[•\u2022\u00B7\-–—]\s*/, '').replace(/^\*\s+/, '').trim();
+                str = str.replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>');
+                return `<div class="summary-dev-item">${str}</div>`;
+              }).join('')}
+            </div>
+          </div>
+        ` : ''}
+
+        <!-- Key Insights & Pattern Recognition Card -->
+        ${patterns && patterns.length > 0 ? `
+          <div class="summary-insights-card">
+            <div class="summary-insights-header">
+              <span class="summary-insights-title">
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"></path><polyline points="3.27 6.96 12 12.01 20.73 6.96"></polyline><line x1="12" y1="22.08" x2="12" y2="12"></line></svg>
+                Insights & Pattern Recognition
+              </span>
+            </div>
+            <div class="summary-patterns-list">
+              ${patterns.map(p => {
+                let str = String(p || '').trim();
+                str = str.replace(/^[•\u2022\u00B7\-–—]\s*/, '').replace(/^\*\s+/, '').trim();
+                str = str.replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>');
+                return `<div class="summary-pattern-item">${str}</div>`;
+              }).join('')}
+            </div>
+          </div>
+        ` : ''}
 
         <!-- Dynamic Contextual Assessment Meter Card (Configured by AI) -->
         <div class="coverage-tone-card">
@@ -1090,16 +1159,38 @@
           </p>
         </div>
 
+        <!-- Key Period Shifts / What Changed Preview -->
+        ${whatChanged && whatChanged.length > 0 ? `
+          <div class="summary-shifts-preview">
+            <div class="summary-shifts-preview-header">
+              <span class="summary-shifts-preview-title">✦ Key Period Shifts</span>
+              <button type="button" class="coral-btn btn-view-full-diff" style="font-size: 10.5px; padding: 2.5px 7px;">View Full Diffs ↗</button>
+            </div>
+            <div class="summary-shifts-list">
+              ${whatChanged.slice(0, 3).map(s => `
+                <div class="summary-shift-pill-item">
+                  <span class="summary-shift-headline">${this.escapeHTML ? this.escapeHTML(s.headline) : s.headline}</span>
+                  <span class="summary-shift-badge ${s.isPositive ? 'positive' : 'negative'}">${this.escapeHTML ? this.escapeHTML(s.changePercent || (s.isPositive ? '+YoY' : '-YoY')) : (s.changePercent || '')}</span>
+                </div>
+              `).join('')}
+            </div>
+          </div>
+        ` : ''}
+
         <!-- Tone Tag -->
         <div class="tone-highlight-pill" id="summary-tone-pill">
           ${res.toneTag || 'Tone: factual'}
+        </div>
+
+        <div class="summary-section-subhead">
+          <span>✦ Core Takeaways & Disclosures</span>
         </div>
 
         <!-- Bullets with Category Headlines & Bold Metrics -->
         <ul class="summary-bullets" id="summary-bullet-list">
           ${(res.bullets || []).map((b) => {
             let str = String(b || '').trim();
-            str = str.replace(/^[\s•\u2022\u00B7\*\-–—]+/, '').trim();
+            str = str.replace(/^[•\u2022\u00B7\-–—]\s*/, '').replace(/^\*\s+/, '').trim();
             str = str.replace(/^[âÂ][€\u0080][¢\u00A2]\s*/, '').trim();
             str = str.replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>');
             if (!str.startsWith('<strong>') && str.includes(':')) {
@@ -1142,7 +1233,7 @@
                   <div class="summary-stock-right">
                     ${s.dailyQuote ? `
                       <div class="summary-stock-quote-group">
-                        <span class="summary-stock-price">$${s.dailyQuote.price}</span>
+                        <span class="summary-stock-price">${this.getStockCurrencySymbol(s.dailyQuote, s.ticker)}${s.dailyQuote.price}</span>
                         <span class="summary-stock-change ${s.dailyQuote.isPositive ? 'positive' : 'negative'}">
                           ${s.dailyQuote.isPositive ? '▲' : '▼'} ${s.dailyQuote.changePercent}
                         </span>
@@ -1171,6 +1262,17 @@
       if (reBtn) {
         reBtn.addEventListener('click', () => this.runSummaryAnalysis());
       }
+
+      // View Full Diffs button
+      const diffBtns = this.shadowRoot.querySelectorAll('.btn-view-full-diff');
+      diffBtns.forEach((btn) => {
+        btn.addEventListener('click', () => {
+          this.switchTab('changed');
+          this.shadowRoot.querySelectorAll('.tab-btn').forEach((b) => b.classList.remove('active'));
+          const targetTab = this.shadowRoot.querySelector('.tab-btn[data-tab="changed"]');
+          if (targetTab) targetTab.classList.add('active');
+        });
+      });
 
       // Stock tracking buttons in the summary stocks box
       this.shadowRoot.querySelectorAll('.btn-summary-stock-track').forEach((btn) => {
@@ -2281,6 +2383,23 @@
       });
     }
 
+    getStockCurrencySymbol(stockOrQuote, ticker = '') {
+      if (stockOrQuote?.currencySymbol) return stockOrQuote.currencySymbol;
+      if (this.watchlistService && typeof this.watchlistService.getCurrencySymbol === 'function') {
+        return this.watchlistService.getCurrencySymbol(stockOrQuote?.currency, ticker || stockOrQuote?.ticker, stockOrQuote?.exchange);
+      }
+      const curr = String(stockOrQuote?.currency || '').toUpperCase();
+      if (curr === 'INR' || curr === '₹') return '₹';
+      if (curr === 'EUR' || curr === '€') return '€';
+      if (curr === 'GBP' || curr === '£') return '£';
+      if (curr === 'JPY' || curr === 'CNY' || curr === '¥') return '¥';
+      if (curr === 'CAD') return 'CA$';
+      if (curr === 'AUD') return 'A$';
+      const t = String(ticker || stockOrQuote?.ticker || '').toUpperCase();
+      if (t.endsWith('.NS') || t.endsWith('.BO') || t.startsWith('NSE:') || t.startsWith('BSE:')) return '₹';
+      return '$';
+    }
+
     // --- Tab 5: Watchlist Daily Digest & Ticker Hub ---
     async renderWatchlistTab(container) {
       if (typeof chrome !== 'undefined' && chrome.runtime && chrome.runtime.sendMessage) {
@@ -2388,7 +2507,7 @@
                   <div class="wl-card-price-row" id="wl-card-price-box-${item.ticker}">
                     ${
                       quote
-                        ? `<span class="wl-card-price">$${quote.price}</span>
+                        ? `<span class="wl-card-price">${this.getStockCurrencySymbol(quote || item.stockQuote || item, item.ticker)}${quote.price}</span>
                            <span class="wl-card-change ${quote.isPositive ? 'positive' : 'negative'}">
                              ${quote.isPositive ? '▲' : '▼'} ${quote.changePercent}
                            </span>`
@@ -2785,8 +2904,19 @@
       // Card Click to Expand / Collapse Detail Tracker
       container.querySelectorAll('.watchlist-stock-card').forEach((card) => {
         card.addEventListener('click', async (e) => {
-          // If clicked inside interactive actions or subtabs, handle separately
-          if (e.target.closest('button') || e.target.closest('a') || e.target.closest('select') || e.target.closest('input')) {
+          // 1. Do not collapse if the user highlighted or selected text
+          const selection = (this.shadowRoot && typeof this.shadowRoot.getSelection === 'function' ? this.shadowRoot.getSelection() : null) || window.getSelection();
+          if (selection && selection.toString().trim().length > 0) {
+            return;
+          }
+
+          // 2. Only expand/collapse if clicking on the main header row or explicit expand trigger
+          if (!e.target.closest('.wl-card-main-row, [data-action="toggle-expand"]')) {
+            return;
+          }
+
+          // 3. Ignore interactive controls (buttons, links, selects, inputs)
+          if (e.target.closest('button, a, select, input, .wl-card-source-link, .wl-star-btn, .btn-sp-mute-ticker, .btn-sp-delete-ticker')) {
             return;
           }
 
@@ -2946,8 +3076,9 @@
               if (q) {
                 const box = this.shadowRoot.getElementById(`wl-card-price-box-${it.ticker}`);
                 if (box) {
+                  const sym = this.getStockCurrencySymbol(q, it.ticker);
                   box.innerHTML = `
-                    <span class="wl-card-price">$${q.price}</span>
+                    <span class="wl-card-price">${sym}${q.price}</span>
                     <span class="wl-card-change ${q.isPositive ? 'positive' : 'negative'}">
                       ${q.isPositive ? '▲' : '▼'} ${q.changePercent}
                     </span>

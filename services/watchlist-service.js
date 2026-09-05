@@ -96,6 +96,30 @@ class WatchlistService {
             modified = true;
           }
         }
+
+        // Heal currency & currency symbol for international/NSE stocks
+        const expectedSym = this.getCurrencySymbol(
+          item.stockQuote?.currency || item.currency,
+          item.ticker,
+          item.stockQuote?.exchange || item.exchange
+        );
+        if (item.currencySymbol !== expectedSym) {
+          item.currencySymbol = expectedSym;
+          modified = true;
+        }
+        if (item.stockQuote && item.stockQuote.currencySymbol !== expectedSym) {
+          item.stockQuote.currencySymbol = expectedSym;
+          modified = true;
+        }
+        if (item.stockQuote && !item.stockQuote.currency && expectedSym === '₹') {
+          item.stockQuote.currency = 'INR';
+          modified = true;
+        }
+        // If marketUpdate was stored with $ for non-USD stocks, fix to the proper currency symbol
+        if (expectedSym !== '$' && item.lastDigest && typeof item.lastDigest.marketUpdate === 'string' && item.lastDigest.marketUpdate.includes('$')) {
+          item.lastDigest.marketUpdate = item.lastDigest.marketUpdate.replace(/\$/g, expectedSym);
+          modified = true;
+        }
       }
       return item;
     });
@@ -463,6 +487,7 @@ class WatchlistService {
     let resolvedCompany = this.resolveCompanyName(cleanTicker, company);
 
     const stockQuote = await this.getDailyStockQuote(cleanTicker);
+    const currSym = (stockQuote && stockQuote.currencySymbol) || this.getCurrencySymbol(stockQuote?.currency, cleanTicker, stockQuote?.exchange);
     if ((!resolvedCompany || resolvedCompany === cleanTicker) && stockQuote && stockQuote.companyName && !this.isPlatformOrGenericName(stockQuote.companyName)) {
       resolvedCompany = stockQuote.companyName;
     }
@@ -476,6 +501,8 @@ class WatchlistService {
       cik: resolvedCik,
       starred: isStarred,
       muted: false,
+      currency: (stockQuote && stockQuote.currency) || (currSym === '₹' ? 'INR' : 'USD'),
+      currencySymbol: currSym,
       stockQuote: stockQuote,
       addedAt: Date.now(),
       lastChecked: Date.now(),
@@ -491,7 +518,7 @@ class WatchlistService {
       lastDigest: {
         tag: 'Quiet',
         summary: `Added to watchlist. Tracking **${resolvedCompany}** for filings and market anomalies.`,
-        marketUpdate: stockQuote ? `Trading at **$${stockQuote.price}** (${stockQuote.changePercent} 1D) with day range of $${stockQuote.dayLow} – $${stockQuote.dayHigh}.` : null,
+        marketUpdate: stockQuote ? `Trading at **${currSym}${stockQuote.price}** (${stockQuote.changePercent} 1D) with day range of ${currSym}${stockQuote.dayLow} – ${currSym}${stockQuote.dayHigh}.` : null,
         date: new Date().toLocaleDateString('en-US', { month: 'short', day: 'numeric' }),
         sourceUrl: null,
       },
@@ -794,6 +821,18 @@ class WatchlistService {
   extractCleanSymbol(ticker) {
     if (!ticker) return '';
     let str = String(ticker).trim().toUpperCase();
+
+    // Convert NSE / BSE exchange prefixes/suffixes to Yahoo format (.NS / .BO)
+    if (/^NSE[:\s]+/i.test(str)) {
+      str = str.replace(/^NSE[:\s]+/i, '') + '.NS';
+    } else if (/^BSE[:\s]+/i.test(str)) {
+      str = str.replace(/^BSE[:\s]+/i, '') + '.BO';
+    } else if (/[\s(]+NSE[)\s]*$/i.test(str)) {
+      str = str.replace(/[\s(]+NSE[)\s]*$/i, '') + '.NS';
+    } else if (/[\s(]+BSE[)\s]*$/i.test(str)) {
+      str = str.replace(/[\s(]+BSE[)\s]*$/i, '') + '.BO';
+    }
+
     str = str.replace(/^(NASDAQ|NYSE|AMEX|BATS|OTC|LSE|TSX)[\s:]+/i, '');
     str = str.replace(/[\s(]+(NASDAQ|NYSE|AMEX|BATS|OTC|LSE|TSX)[)\s]*/i, '');
     str = str.replace(/[^A-Z0-9.\-\/\s]/g, '').trim();
@@ -807,6 +846,46 @@ class WatchlistService {
     const m = str.match(/^[A-Z0-9.\-]+/);
     const sym = m ? m[0].trim() : str.split(/[\s,()]/)[0].trim();
     return sym.replace(/[^A-Z0-9.\-]/g, '');
+  }
+
+  /**
+   * Universal currency symbol resolver for global equities (NSE/BSE, LSE, TSX, ASX, etc.)
+   */
+  getCurrencySymbol(currency = '', ticker = '', exchange = '') {
+    const curr = String(currency || '').toUpperCase().trim();
+    const tick = String(ticker || '').toUpperCase().trim();
+    const exch = String(exchange || '').toUpperCase().trim();
+
+    // 1. Check explicit currency code
+    if (curr === 'INR' || curr === '₹' || curr === 'RS' || curr === 'RUPEES') return '₹';
+    if (curr === 'EUR' || curr === '€') return '€';
+    if (curr === 'GBP' || curr === 'GBX' || curr === '£') return '£';
+    if (curr === 'JPY' || curr === 'CNY' || curr === '¥') return '¥';
+    if (curr === 'CAD' || curr === 'C$') return 'CA$';
+    if (curr === 'AUD' || curr === 'A$') return 'A$';
+    if (curr === 'HKD' || curr === 'HK$') return 'HK$';
+    if (curr === 'CHF') return 'CHF ';
+    if (curr === 'SGD') return 'S$';
+    if (curr === 'USD' || curr === '$') return '$';
+
+    // 2. Check exchange name
+    if (exch.includes('NSE') || exch.includes('NSI') || exch.includes('BSE') || exch.includes('BOM') || exch.includes('INDIA')) return '₹';
+    if (exch.includes('LSE') || exch.includes('LONDON')) return '£';
+    if (exch.includes('TSX') || exch.includes('TORONTO')) return 'CA$';
+    if (exch.includes('ASX') || exch.includes('AUSTRALIA')) return 'A$';
+    if (exch.includes('TYO') || exch.includes('TOKYO')) return '¥';
+
+    // 3. Check ticker suffix or prefix
+    if (tick.endsWith('.NS') || tick.endsWith('.BO') || tick.startsWith('NSE:') || tick.startsWith('BSE:')) return '₹';
+    if (tick.endsWith('.L') || tick.endsWith('.IL')) return '£';
+    if (tick.endsWith('.TO') || tick.endsWith('.VN') || tick.endsWith('.V')) return 'CA$';
+    if (tick.endsWith('.AX')) return 'A$';
+    if (tick.endsWith('.T')) return '¥';
+    if (tick.endsWith('.DE') || tick.endsWith('.PA') || tick.endsWith('.AS') || tick.endsWith('.MC') || tick.endsWith('.MI')) return '€';
+    if (tick.endsWith('.HK')) return 'HK$';
+
+    // 4. Default to US Dollar
+    return '$';
   }
 
   /**
@@ -831,8 +910,28 @@ class WatchlistService {
       'GAAP', 'NON', 'EPS', 'EBIT', 'FCF', 'ARR', 'API', 'LLM', 'ESG', 'ITEM', 'FORM',
       'NOTE', 'REV', 'NEW', 'TRUE', 'FALSE', 'AND', 'THE', 'FOR', 'ALL', 'CAN', 'SEE',
       'TOP', 'LOW', 'NET', 'TAX', 'FX', 'CPI', 'GDP', 'FED', 'BUY', 'HOLD', 'SELL',
-      'YAHOO', 'FINANCE', 'NEWS', 'CNBC', 'BLOOMBERG', 'REUTERS', 'MARKET', 'MARKETS'
+      'YAHOO', 'FINANCE', 'NEWS', 'CNBC', 'BLOOMBERG', 'REUTERS', 'MARKET', 'MARKETS', 'ARTICLE',
+      'SP500', 'S&P500', 'GSPC', 'SPX', 'DJI', 'DJIA', 'DOW', 'DOW30', 'IXIC', 'COMP',
+      'RUT', 'RUSSELL', 'RUSSELL2000', 'VIX', 'TNX', 'TYX', 'FVX', 'USMARKETS'
     ]);
+
+    // 0. If pageData explicitly provided extracted discussedStocks (e.g. from article pills/headline)
+    if (pageData && Array.isArray(pageData.discussedStocks)) {
+      for (const s of pageData.discussedStocks) {
+        if (s && (s.ticker || typeof s === 'string')) {
+          const raw = typeof s === 'string' ? s : s.ticker;
+          const clean = this.extractCleanSymbol(raw);
+          if (clean && clean.length <= 5 && !blacklistedWords.has(clean) && !clean.startsWith('^')) {
+            candidates.push({
+              ticker: clean,
+              company: s.company || this.resolveCompanyName(clean),
+              cik: s.cik || '',
+              fromAI: true
+            });
+          }
+        }
+      }
+    }
 
     // 1. If AI explicitly provided discussedStocks
     if (Array.isArray(summaryResult.discussedStocks)) {
@@ -840,7 +939,7 @@ class WatchlistService {
         if (s && (s.ticker || typeof s === 'string')) {
           const rawTicker = typeof s === 'string' ? s : s.ticker;
           const clean = this.extractCleanSymbol(rawTicker);
-          if (clean && clean.length <= 5 && !blacklistedWords.has(clean)) {
+          if (clean && clean.length <= 5 && !blacklistedWords.has(clean) && !clean.startsWith('^')) {
             candidates.push({
               ticker: clean,
               company: s.company || this.resolveCompanyName(clean),
@@ -863,7 +962,7 @@ class WatchlistService {
       let m;
       while ((m = rx.exec(summaryText)) !== null) {
         const raw = m[1].toUpperCase();
-        if (raw.length >= 1 && raw.length <= 5 && !blacklistedWords.has(raw)) {
+        if (raw.length >= 1 && raw.length <= 5 && !blacklistedWords.has(raw) && !raw.startsWith('^')) {
           candidates.push({ ticker: raw, company: '' });
         }
       }
@@ -885,7 +984,7 @@ class WatchlistService {
     // 4. Check if pageData.ticker / pageData.company is discussed in summary
     if (pageData && pageData.ticker) {
       const pageTicker = this.extractCleanSymbol(pageData.ticker);
-      if (pageTicker && !blacklistedWords.has(pageTicker)) {
+      if (pageTicker && !blacklistedWords.has(pageTicker) && !pageTicker.startsWith('^')) {
         const pageComp = (pageData.company || '').toLowerCase();
         const coreComp = pageComp.replace(/\s+(Inc\.|Corporation|Corp\.|Company|Co\.|Holdings).*$/i, '').trim();
         const tickerInSummary = new RegExp(`\\b${pageTicker}\\b`, 'i').test(summaryText);
@@ -904,7 +1003,7 @@ class WatchlistService {
 
     for (const c of candidates) {
       const clean = this.extractCleanSymbol(c.ticker);
-      if (!clean || seen.has(clean) || blacklistedWords.has(clean)) continue;
+      if (!clean || seen.has(clean) || blacklistedWords.has(clean) || clean.startsWith('^') || clean.startsWith('%5E')) continue;
       seen.add(clean);
 
       const pop = POPULAR_COMPANIES.find(p => p.ticker === clean);
@@ -1217,6 +1316,9 @@ class WatchlistService {
             const diff = price - prevClose;
             const changePct = prevClose ? (diff / prevClose) * 100 : 0;
 
+            const currency = meta.currency || (cleanTicker.endsWith('.NS') || cleanTicker.endsWith('.BO') ? 'INR' : 'USD');
+            const currencySymbol = this.getCurrencySymbol(currency, cleanTicker, meta.exchangeName || meta.fullExchangeName);
+
             const quoteObj = {
               ticker: cleanTicker,
               companyName: meta.shortName || meta.longName || null,
@@ -1224,7 +1326,9 @@ class WatchlistService {
               change: (diff >= 0 ? '+' : '') + (Math.abs(diff) >= 10000 ? Math.abs(diff).toLocaleString('en-US', { maximumFractionDigits: 0 }) : diff.toFixed(2)),
               changePercent: (changePct >= 0 ? '+' : '') + changePct.toFixed(2) + '%',
               isPositive: diff >= 0,
-              currency: meta.currency || 'USD',
+              currency: currency,
+              currencySymbol: currencySymbol,
+              exchange: meta.exchangeName || meta.fullExchangeName || null,
               dayHigh: (meta.regularMarketDayHigh || price) >= 10000 ? (meta.regularMarketDayHigh || price).toLocaleString('en-US', { maximumFractionDigits: 0 }) : (meta.regularMarketDayHigh || price).toFixed(2),
               dayLow: (meta.regularMarketDayLow || price) >= 10000 ? (meta.regularMarketDayLow || price).toLocaleString('en-US', { maximumFractionDigits: 0 }) : (meta.regularMarketDayLow || price).toFixed(2),
               volume: meta.regularMarketVolume
@@ -1250,17 +1354,17 @@ class WatchlistService {
 
     // 3. Accurate verified reference data for known stocks & demo filings
     const verifiedQuotes = {
-      'BRK.A': { companyName: 'Berkshire Hathaway Inc.', price: '760,600', change: '+2,100', changePercent: '+0.28%', isPositive: true, dayHigh: '765,000', dayLow: '758,000', volume: '1.2K', currency: 'USD' },
-      'BRK.B': { companyName: 'Berkshire Hathaway Inc.', price: '507.04', change: '+1.84', changePercent: '+0.36%', isPositive: true, dayHigh: '509.80', dayLow: '504.10', volume: '3.8M', currency: 'USD' },
-      AAPL: { companyName: 'Apple Inc.', price: '325.05', change: '-0.24', changePercent: '-0.07%', isPositive: false, dayHigh: '328.40', dayLow: '323.53', volume: '48.5M', currency: 'USD' },
-      NVDA: { companyName: 'NVIDIA Corporation', price: '225.03', change: '+7.59', changePercent: '+3.49%', isPositive: true, dayHigh: '227.95', dayLow: '218.48', volume: '74.2M', currency: 'USD' },
-      TSLA: { companyName: 'Tesla, Inc.', price: '353.15', change: '-2.94', changePercent: '-0.83%', isPositive: false, dayHigh: '360.62', dayLow: '349.92', volume: '62.1M', currency: 'USD' },
-      MSFT: { companyName: 'Microsoft Corporation', price: '496.60', change: '-4.42', changePercent: '-0.88%', isPositive: false, dayHigh: '500.27', dayLow: '493.81', volume: '21.4M', currency: 'USD' },
-      GOOGL: { companyName: 'Alphabet Inc.', price: '337.60', change: '+2.58', changePercent: '+0.77%', isPositive: true, dayHigh: '339.35', dayLow: '335.02', volume: '24.1M', currency: 'USD' },
-      AMZN: { companyName: 'Amazon.com, Inc.', price: '254.56', change: '-0.36', changePercent: '-0.14%', isPositive: false, dayHigh: '259.77', dayLow: '254.64', volume: '33.8M', currency: 'USD' },
-      META: { companyName: 'Meta Platforms, Inc.', price: '512.30', change: '+8.40', changePercent: '+1.67%', isPositive: true, dayHigh: '516.00', dayLow: '506.20', volume: '18.9M', currency: 'USD' },
-      AMD: { companyName: 'Advanced Micro Devices, Inc.', price: '154.20', change: '+2.10', changePercent: '+1.38%', isPositive: true, dayHigh: '156.00', dayLow: '151.80', volume: '38.6M', currency: 'USD' },
-      NWMC: { companyName: 'Northwind Materials Corp.', price: '48.60', change: '+0.75', changePercent: '+1.57%', isPositive: true, dayHigh: '49.40', dayLow: '47.90', volume: '3.4M', currency: 'USD' },
+      'BRK.A': { companyName: 'Berkshire Hathaway Inc.', price: '760,600', change: '+2,100', changePercent: '+0.28%', isPositive: true, dayHigh: '765,000', dayLow: '758,000', volume: '1.2K', currency: 'USD', currencySymbol: '$' },
+      'BRK.B': { companyName: 'Berkshire Hathaway Inc.', price: '507.04', change: '+1.84', changePercent: '+0.36%', isPositive: true, dayHigh: '509.80', dayLow: '504.10', volume: '3.8M', currency: 'USD', currencySymbol: '$' },
+      AAPL: { companyName: 'Apple Inc.', price: '325.05', change: '-0.24', changePercent: '-0.07%', isPositive: false, dayHigh: '328.40', dayLow: '323.53', volume: '48.5M', currency: 'USD', currencySymbol: '$' },
+      NVDA: { companyName: 'NVIDIA Corporation', price: '225.03', change: '+7.59', changePercent: '+3.49%', isPositive: true, dayHigh: '227.95', dayLow: '218.48', volume: '74.2M', currency: 'USD', currencySymbol: '$' },
+      TSLA: { companyName: 'Tesla, Inc.', price: '353.15', change: '-2.94', changePercent: '-0.83%', isPositive: false, dayHigh: '360.62', dayLow: '349.92', volume: '62.1M', currency: 'USD', currencySymbol: '$' },
+      MSFT: { companyName: 'Microsoft Corporation', price: '496.60', change: '-4.42', changePercent: '-0.88%', isPositive: false, dayHigh: '500.27', dayLow: '493.81', volume: '21.4M', currency: 'USD', currencySymbol: '$' },
+      GOOGL: { companyName: 'Alphabet Inc.', price: '337.60', change: '+2.58', changePercent: '+0.77%', isPositive: true, dayHigh: '339.35', dayLow: '335.02', volume: '24.1M', currency: 'USD', currencySymbol: '$' },
+      AMZN: { companyName: 'Amazon.com, Inc.', price: '254.56', change: '-0.36', changePercent: '-0.14%', isPositive: false, dayHigh: '259.77', dayLow: '254.64', volume: '33.8M', currency: 'USD', currencySymbol: '$' },
+      META: { companyName: 'Meta Platforms, Inc.', price: '512.30', change: '+8.40', changePercent: '+1.67%', isPositive: true, dayHigh: '516.00', dayLow: '506.20', volume: '18.9M', currency: 'USD', currencySymbol: '$' },
+      AMD: { companyName: 'Advanced Micro Devices, Inc.', price: '154.20', change: '+2.10', changePercent: '+1.38%', isPositive: true, dayHigh: '156.00', dayLow: '151.80', volume: '38.6M', currency: 'USD', currencySymbol: '$' },
+      NWMC: { companyName: 'Northwind Materials Corp.', price: '48.60', change: '+0.75', changePercent: '+1.57%', isPositive: true, dayHigh: '49.40', dayLow: '47.90', volume: '3.4M', currency: 'USD', currencySymbol: '$' },
     };
 
     if (verifiedQuotes[cleanTicker]) {
@@ -1412,6 +1516,9 @@ class WatchlistService {
               '1y': '1-Year Price Trend',
             };
 
+            const currency = meta.currency || (cleanTicker.endsWith('.NS') || cleanTicker.endsWith('.BO') ? 'INR' : 'USD');
+            const currencySymbol = this.getCurrencySymbol(currency, cleanTicker, meta.exchangeName || meta.fullExchangeName);
+
             const historyObj = {
               ticker: cleanTicker,
               range: normRange,
@@ -1428,6 +1535,8 @@ class WatchlistService {
                 : (isYear && meta.fiftyTwoWeekLow ? meta.fiftyTwoWeekLow : minPrice).toFixed(2),
               changePercent: (diff >= 0 ? '+' : '') + changePct + '%',
               isPositive,
+              currency,
+              currencySymbol,
               timestamp: Date.now(),
               isLive: true,
             };
@@ -1450,6 +1559,8 @@ class WatchlistService {
     const liveQuote = await this.getDailyStockQuote(cleanTicker);
     const curPrice = liveQuote ? parseFloat(liveQuote.price) : 100.0;
     const isPosQuote = liveQuote ? liveQuote.isPositive : true;
+    const histCurrency = liveQuote?.currency || (cleanTicker.endsWith('.NS') || cleanTicker.endsWith('.BO') ? 'INR' : 'USD');
+    const histCurrencySymbol = liveQuote?.currencySymbol || this.getCurrencySymbol(histCurrency, cleanTicker, liveQuote?.exchange);
 
     // Range multipliers & characteristics
     const rangeParams = {
@@ -1505,6 +1616,8 @@ class WatchlistService {
       lowPrice: lowP >= 10000 ? lowP.toFixed(0) : lowP.toFixed(2),
       changePercent: (diff >= 0 ? '+' : '') + changePct + '%',
       isPositive: diff >= 0,
+      currency: histCurrency,
+      currencySymbol: histCurrencySymbol,
       timestamp: Date.now(),
       isLive: false,
     };
@@ -1901,6 +2014,7 @@ class WatchlistService {
       });
     }
 
+    const currSym = quote?.currencySymbol || item?.currencySymbol || this.getCurrencySymbol(quote?.currency || item?.currency, cleanTicker, quote?.exchange || item?.exchange);
     let updateBadge = 'Up to date';
     let updateDate = 'Today';
     let whatsNew = [];
@@ -1911,7 +2025,7 @@ class WatchlistService {
       updateDate = newF?.date || 'Today';
       whatsNew = [
         `${newF?.form || 'SEC'} filing registered on EDGAR (${newF?.title || 'Filing disclosures'})`,
-        `Trading at $${quote?.price || '—'} (${quote?.changePercent || '0.00%'} 1D) with day range $${quote?.dayLow || '—'} – $${quote?.dayHigh || '—'}`,
+        `Trading at ${currSym}${quote?.price || '—'} (${quote?.changePercent || '0.00%'} 1D) with day range ${currSym}${quote?.dayLow || '—'} – ${currSym}${quote?.dayHigh || '—'}`,
         `Regulatory disclosures and governance monitoring continuous`,
       ];
     } else if (hasNewNews) {
@@ -1920,14 +2034,14 @@ class WatchlistService {
       updateDate = newN?.date || 'Today';
       whatsNew = [
         `Market intelligence: "${newN?.title || 'Breaking coverage'}" (${newN?.source || 'Financial News'})`,
-        `Trading at $${quote?.price || '—'} (${quote?.changePercent || '0.00%'} 1D) with 24h volume of ${quote?.volume || 'normal'}`,
+        `Trading at ${currSym}${quote?.price || '—'} (${quote?.changePercent || '0.00%'} 1D) with 24h volume of ${quote?.volume || 'normal'}`,
         `All periodic SEC filings are verified up to date (no new filings since last check)`,
       ];
     } else {
       updateBadge = 'Up to date';
       updateDate = 'Today';
       whatsNew = [
-        `Trading at $${quote?.price || '—'} (${quote?.changePercent || '0.00%'} 1D) with day range $${quote?.dayLow || '—'} – $${quote?.dayHigh || '—'}`,
+        `Trading at ${currSym}${quote?.price || '—'} (${quote?.changePercent || '0.00%'} 1D) with day range ${currSym}${quote?.dayLow || '—'} – ${currSym}${quote?.dayHigh || '—'}`,
         `All periodic SEC filings and disclosures verified up to date`,
         `Continuous monitoring active: No new regulatory filings or breaking disclosures since last check`,
       ];
@@ -1941,6 +2055,8 @@ class WatchlistService {
       cik,
       quote,
       history,
+      currency: quote?.currency || item?.currency || 'USD',
+      currencySymbol: currSym,
       sourceUrl,
       hasNewFilings,
       hasNewNews,
@@ -2054,6 +2170,7 @@ class WatchlistService {
     }).join('');
 
     const lastPt = coords[coords.length - 1];
+    const currSym = (historyData && (historyData.currencySymbol || this.getCurrencySymbol(historyData.currency, ticker))) || '$';
 
     return `
       <div class="stock-trend-card" data-ticker="${ticker}">
@@ -2065,7 +2182,7 @@ class WatchlistService {
             </div>
             ${company ? `<div class="stock-trend-company-name">${company}</div>` : ''}
             <div class="stock-trend-price-row">
-              <span class="stock-trend-current-price">$${endPrice}</span>
+              <span class="stock-trend-current-price">${currSym}${endPrice}</span>
               <span class="stock-trend-badge ${isPositive ? 'positive' : 'negative'}">
                 ${isPositive ? '▲' : '▼'} ${changePercent} (1Y)
               </span>
@@ -2077,7 +2194,7 @@ class WatchlistService {
             </div>
             <div class="stock-trend-range-box" style="margin-top: 5px;">
               <span class="stock-trend-range-label">52W Range</span>
-              <span class="stock-trend-range-val">$${lowPrice} – $${highPrice}</span>
+              <span class="stock-trend-range-val">${currSym}${lowPrice} – ${currSym}${highPrice}</span>
             </div>
           </div>
         </div>
@@ -2404,11 +2521,12 @@ class WatchlistService {
 
     // Dynamic Generator for Any Custom Stock Added by User
     const compName = (POPULAR_COMPANIES.find((c) => c.ticker === cleanTicker)?.title) || cleanTicker;
+    const currSym = quote?.currencySymbol || this.getCurrencySymbol(quote?.currency, cleanTicker, quote?.exchange);
     const priceVal = quote ? quote.price : '100.00';
     const chgVal = quote ? quote.changePercent : '+1.5%';
     const isPos = quote ? quote.isPositive : true;
 
-    const dynamicOverview = `${compName} (${cleanTicker}) filed its latest Form 10-Q periodic disclosure. The company is currently trading at **$${priceVal}** (${chgVal} 1D), demonstrating solid operational execution across core business units with stable gross margins and ongoing capital discipline.`;
+    const dynamicOverview = `${compName} (${cleanTicker}) filed its latest Form 10-Q periodic disclosure. The company is currently trading at **${currSym}${priceVal}** (${chgVal} 1D), demonstrating solid operational execution across core business units with stable gross margins and ongoing capital discipline.`;
     const dynamicBullets = [
       `**Core Operating Performance:** ${compName} maintained positive revenue expansion in its latest quarterly reporting period, demonstrating operational resilience in core markets.`,
       `**Operating Cash Flow & Liquidity:** Maintained disciplined balance sheet liquidity and steady free cash flow conversion to support strategic operational initiatives.`,

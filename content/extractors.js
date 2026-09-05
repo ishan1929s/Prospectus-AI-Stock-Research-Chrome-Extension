@@ -4,6 +4,30 @@
  * earnings reports, financial portals, and general research documents.
  */
 
+// Market Index & Benchmark exclusion registry
+const MARKET_INDEX_SYMBOLS = new Set([
+  'SP500', 'S&P500', 'S&P 500', 'GSPC', '^GSPC', 'SPX', '^SPX',
+  'DJI', '^DJI', 'DJIA', 'DOW', 'DOW30', 'DOW 30',
+  'IXIC', '^IXIC', 'COMP', 'NASDAQ', 'NASDAQ COMPOSITE',
+  'RUT', '^RUT', 'RUSSELL', 'RUSSELL 2000', 'RUSSELL2000',
+  'VIX', '^VIX', 'VOLATILITY S&P 500',
+  'TNX', '^TNX', 'TYX', 'FVX',
+  'WTI', 'BRENT', 'GOLD', 'SILVER', 'CRUDE OIL',
+  'US MARKETS', 'MARKETS', 'WORLD MARKETS'
+]);
+
+// Common English words that can appear in headlines in all caps but are NOT stock tickers
+const COMMON_HEADLINE_WORDS = new Set([
+  'THE', 'AND', 'FOR', 'WHY', 'HOW', 'ALL', 'ARE', 'WAS', 'NOT', 'ITS',
+  'OWN', 'OUT', 'NEW', 'BIG', 'TOP', 'CAN', 'SEE', 'BUY', 'DAY', 'RUN',
+  'HIT', 'NOW', 'MAY', 'SET', 'GOT', 'HAD', 'HAS', 'BUT', 'OFF', 'LOW',
+  'OLD', 'CUT', 'WIN', 'WON', 'YES', 'ONE', 'TWO', 'SIX', 'TEN', 'WAR',
+  'GAS', 'OIL', 'AIR', 'CAR', 'JOB', 'PAY', 'TAX', 'CEO', 'CFO', 'CTO',
+  'SEC', 'FED', 'GDP', 'CPI', 'PDF', 'DOC', 'APP', 'AI', 'EST', 'EPS',
+  'YoY', 'YOY', 'Q1', 'Q2', 'Q3', 'Q4', 'FY24', 'FY25', 'FY26', 'BEAT',
+  'MISS', 'FALL', 'RISE', 'JUMP', 'DROP', 'GAIN', 'LOSS', 'TRIP', 'SOAR'
+]);
+
 // Common CIK to Ticker / Name mapping for top searched SEC companies
 const KNOWN_CIKS = {
   '0001318605': { ticker: 'TSLA', company: 'Tesla, Inc.', exchange: 'NASDAQ', sector: 'Automotive / Tech' },
@@ -20,6 +44,38 @@ const KNOWN_CIKS = {
   '1045810': { ticker: 'NVDA', company: 'NVIDIA Corporation', exchange: 'NASDAQ', sector: 'Semiconductors' },
   '0001326801': { ticker: 'META', company: 'Meta Platforms, Inc.', exchange: 'NASDAQ', sector: 'Technology' },
   '1326801': { ticker: 'META', company: 'Meta Platforms, Inc.', exchange: 'NASDAQ', sector: 'Technology' },
+  '0000200406': { ticker: 'JNJ', company: 'Johnson & Johnson', exchange: 'NYSE', sector: 'Healthcare' },
+  '200406': { ticker: 'JNJ', company: 'Johnson & Johnson', exchange: 'NYSE', sector: 'Healthcare' },
+  '0000059478': { ticker: 'LLY', company: 'Eli Lilly and Company', exchange: 'NYSE', sector: 'Healthcare' },
+  '59478': { ticker: 'LLY', company: 'Eli Lilly and Company', exchange: 'NYSE', sector: 'Healthcare' },
+  '0001613103': { ticker: 'MDT', company: 'Medtronic plc', exchange: 'NYSE', sector: 'Healthcare' },
+  '1613103': { ticker: 'MDT', company: 'Medtronic plc', exchange: 'NYSE', sector: 'Healthcare' },
+  '0000019617': { ticker: 'JPM', company: 'JPMorgan Chase & Co.', exchange: 'NYSE', sector: 'Financials' },
+  '19617': { ticker: 'JPM', company: 'JPMorgan Chase & Co.', exchange: 'NYSE', sector: 'Financials' },
+  '0001403161': { ticker: 'V', company: 'Visa Inc.', exchange: 'NYSE', sector: 'Financials' },
+  '1403161': { ticker: 'V', company: 'Visa Inc.', exchange: 'NYSE', sector: 'Financials' },
+  '0000731766': { ticker: 'UNH', company: 'UnitedHealth Group Inc.', exchange: 'NYSE', sector: 'Healthcare' },
+  '731766': { ticker: 'UNH', company: 'UnitedHealth Group Inc.', exchange: 'NYSE', sector: 'Healthcare' },
+  '0000034088': { ticker: 'XOM', company: 'Exxon Mobil Corporation', exchange: 'NYSE', sector: 'Energy' },
+  '34088': { ticker: 'XOM', company: 'Exxon Mobil Corporation', exchange: 'Energy' },
+  '0000080424': { ticker: 'PG', company: 'Procter & Gamble Company', exchange: 'NYSE', sector: 'Consumer Staples' },
+  '80424': { ticker: 'PG', company: 'Procter & Gamble Company', exchange: 'NYSE', sector: 'Consumer Staples' },
+  '0001730168': { ticker: 'AVGO', company: 'Broadcom Inc.', exchange: 'NASDAQ', sector: 'Technology' },
+  '1730168': { ticker: 'AVGO', company: 'Broadcom Inc.', exchange: 'NASDAQ', sector: 'Technology' },
+  '0000354950': { ticker: 'HD', company: 'Home Depot, Inc.', exchange: 'NYSE', sector: 'Consumer Discretionary' },
+  '354950': { ticker: 'HD', company: 'Home Depot, Inc.', exchange: 'NYSE', sector: 'Consumer Discretionary' },
+  '0000909832': { ticker: 'COST', company: 'Costco Wholesale Corp.', exchange: 'NASDAQ', sector: 'Consumer Staples' },
+  '909832': { ticker: 'COST', company: 'Costco Wholesale Corp.', exchange: 'NASDAQ', sector: 'Consumer Staples' },
+  '0000002488': { ticker: 'AMD', company: 'Advanced Micro Devices, Inc.', exchange: 'NASDAQ', sector: 'Technology' },
+  '2488': { ticker: 'AMD', company: 'Advanced Micro Devices, Inc.', exchange: 'NASDAQ', sector: 'Technology' },
+  '0001065280': { ticker: 'NFLX', company: 'Netflix, Inc.', exchange: 'NASDAQ', sector: 'Communication Services' },
+  '1065280': { ticker: 'NFLX', company: 'Netflix, Inc.', exchange: 'NASDAQ', sector: 'Communication Services' },
+  '0001321655': { ticker: 'PLTR', company: 'Palantir Technologies Inc.', exchange: 'NYSE', sector: 'Technology' },
+  '1321655': { ticker: 'PLTR', company: 'Palantir Technologies Inc.', exchange: 'NYSE', sector: 'Technology' },
+  '0000104169': { ticker: 'WMT', company: 'Walmart Inc.', exchange: 'NYSE', sector: 'Consumer Staples' },
+  '104169': { ticker: 'WMT', company: 'Walmart Inc.', exchange: 'NYSE', sector: 'Consumer Staples' },
+  '0000070858': { ticker: 'BAC', company: 'Bank of America Corp.', exchange: 'NYSE', sector: 'Financials' },
+  '70858': { ticker: 'BAC', company: 'Bank of America Corp.', exchange: 'NYSE', sector: 'Financials' },
 };
 
 class FinancialExtractors {
@@ -278,6 +334,110 @@ class FinancialExtractors {
   }
 
   /**
+   * Check if a ticker symbol or label represents a market index or benchmark
+   */
+  static isMarketIndex(symbol = '', text = '') {
+    if (!symbol && !text) return false;
+    const cleanSym = String(symbol || '').trim().toUpperCase();
+    const cleanText = String(text || '').trim().toUpperCase();
+    
+    if (cleanSym.startsWith('^') || cleanSym.startsWith('%5E')) return true;
+    if (MARKET_INDEX_SYMBOLS.has(cleanSym)) return true;
+    
+    if (
+      cleanText.includes('S&P 500') ||
+      cleanText.includes('DOW 30') ||
+      cleanText.includes('DOW JONES') ||
+      cleanText.includes('NASDAQ COMPOSITE') ||
+      cleanText.includes('RUSSELL 2000') ||
+      cleanText.includes('VOLATILITY INDEX') ||
+      cleanText.includes('US MARKETS')
+    ) {
+      return true;
+    }
+    return false;
+  }
+
+  /**
+   * Helper to format all-caps company names into clean Title Case
+   */
+  static toTitleCase(str = '') {
+    if (!str) return '';
+    return str
+      .toLowerCase()
+      .split(' ')
+      .map((word) => {
+        if (!word) return '';
+        if (['inc.', 'inc', 'corp.', 'corp', 'llc', 'plc', 'ltd.', 'ltd', 'lp', 'nv', 'sa'].includes(word)) {
+          return word.toUpperCase();
+        }
+        if (word === '&') return '&';
+        return word.charAt(0).toUpperCase() + word.slice(1);
+      })
+      .join(' ')
+      .replace(/\s+/g, ' ')
+      .trim();
+  }
+
+  /**
+   * Universal stock metadata resolver (checks POPULAR_COMPANIES, ALL_US_STOCKS, and KNOWN_CIKS)
+   */
+  static resolveStockMetadata(ticker = '') {
+    if (!ticker) return { ticker: '', company: 'Company', cik: '', exchange: 'US' };
+    const clean = String(ticker).toUpperCase().trim();
+
+    // 1. Check POPULAR_COMPANIES if available in memory
+    const popList = typeof POPULAR_COMPANIES !== 'undefined'
+      ? POPULAR_COMPANIES
+      : (typeof globalThis !== 'undefined' && globalThis.POPULAR_COMPANIES ? globalThis.POPULAR_COMPANIES : null);
+
+    if (popList && Array.isArray(popList)) {
+      const match = popList.find((p) => p.ticker === clean);
+      if (match) {
+        return {
+          ticker: clean,
+          company: match.title,
+          cik: match.cik || '',
+          exchange: match.exchange || 'US',
+        };
+      }
+    }
+
+    // 2. Check ALL_US_STOCKS complete American equities registry (10,412 stocks)
+    const usRegistry = typeof ALL_US_STOCKS !== 'undefined'
+      ? ALL_US_STOCKS
+      : (typeof globalThis !== 'undefined' && globalThis.ALL_US_STOCKS ? globalThis.ALL_US_STOCKS : null);
+
+    if (usRegistry && Array.isArray(usRegistry)) {
+      const row = usRegistry.find((s) => s[0] === clean);
+      if (row) {
+        const cikFormatted = String(row[2] || '').padStart(10, '0');
+        const formattedTitle = this.toTitleCase(row[1]);
+        return {
+          ticker: clean,
+          company: formattedTitle,
+          cik: cikFormatted,
+          exchange: row[3] || 'US',
+        };
+      }
+    }
+
+    // 3. Check KNOWN_CIKS mapping
+    const known = Object.values(KNOWN_CIKS).find((k) => k.ticker === clean);
+    if (known) {
+      const cikEntry = Object.entries(KNOWN_CIKS).find(([c, v]) => v.ticker === clean && c.length === 10);
+      return {
+        ticker: clean,
+        company: known.company,
+        cik: cikEntry ? cikEntry[0] : '',
+        exchange: known.exchange || 'US',
+      };
+    }
+
+    return { ticker: clean, company: clean, cik: '', exchange: 'US' };
+  }
+
+  /**
    * 2. Yahoo Finance Parser
    */
   static extractYahooFinance() {
@@ -294,14 +454,14 @@ class FinancialExtractors {
       let exchange = 'US';
       let sector = 'Equities';
 
-      const tickerMatch = path.match(/\/quote\/([A-Za-z0-9.-]+)/i);
-      if (tickerMatch) ticker = tickerMatch[1].toUpperCase();
+      const tickerMatch = path.match(/\/quote\/([A-Za-z0-9.%^=-]+)/i);
+      if (tickerMatch) ticker = decodeURIComponent(tickerMatch[1]).toUpperCase();
 
       // 1. Try extracting company & ticker from document.title (standard format: "Apple Inc. (AAPL) Stock Price...")
-      const titleMatch = rawTitle.match(/^([^(]+?)\s*\(\s*([A-Za-z0-9.-]+)\s*\)/);
+      const titleMatch = rawTitle.match(/^([^(]+?)\s*\(\s*([A-Za-z0-9.%^=-]+)\s*\)/);
       if (titleMatch) {
         const tComp = titleMatch[1].trim();
-        const tTick = titleMatch[2].toUpperCase();
+        const tTick = decodeURIComponent(titleMatch[2]).toUpperCase();
         if (tComp && !tComp.toLowerCase().includes('yahoo')) {
           company = tComp;
         }
@@ -321,16 +481,17 @@ class FinancialExtractors {
             company = hComp;
           }
           if (parts[1] && !ticker) {
-            ticker = parts[1].replace(')', '').trim().toUpperCase();
+            ticker = decodeURIComponent(parts[1].replace(')', '')).trim().toUpperCase();
           }
         }
       }
 
       // 3. Fallback to known registry if company is still empty, generic, or equals "Yahoo Finance"
       if (!company || company.toLowerCase().includes('yahoo') || company.toLowerCase() === 'company') {
-        const knownMatch = Object.values(KNOWN_CIKS).find((k) => k.ticker === ticker);
-        if (knownMatch && knownMatch.company) {
-          company = knownMatch.company;
+        const resolved = this.resolveStockMetadata(ticker);
+        if (resolved && resolved.company && resolved.company !== ticker) {
+          company = resolved.company;
+          if (resolved.exchange) exchange = resolved.exchange;
         } else if (ticker) {
           const cleanBeforePrice = cleanTitle.replace(/\s*(?:Stock Price|Stock Quote|Quote|History).*$/i, '').replace(/\s*\([A-Z0-9.-]+\)\s*/i, '').trim();
           if (cleanBeforePrice && !cleanBeforePrice.toLowerCase().includes('yahoo') && cleanBeforePrice.length < 50) {
@@ -341,6 +502,10 @@ class FinancialExtractors {
         } else {
           company = 'Company';
         }
+      }
+
+      if (this.isMarketIndex(ticker, company)) {
+        sector = 'Market Index';
       }
 
       const headlines = [];
@@ -370,28 +535,157 @@ class FinancialExtractors {
     }
 
     // Article / Story on Yahoo Finance (e.g. /markets/stocks/articles/..., /news/...)
-    const h1El = document.querySelector('article h1, main h1, h1.yf-xx');
-    const articleHeadline = h1El && !h1El.innerText.toLowerCase().includes('yahoo')
+    return this.extractYahooFinanceArticle(cleanTitle);
+  }
+
+  /**
+   * Intelligent Yahoo Finance Article Parser:
+   * Scopes queries strictly inside the article body, filters out top-nav market index links
+   * (e.g. S&P 500 / ^GSPC), extracts true subject stock from headline & article ticker pills,
+   * and resolves full corporate metadata.
+   */
+  static extractYahooFinanceArticle(cleanTitle = '') {
+    const path = window.location.pathname;
+
+    // 1. Article Headline
+    const h1El = document.querySelector('article h1, main h1, [data-test-id="article-header"] h1, .caas-title, .cover-title, h1[data-test-id="headline"], h1[class*="yf-"], h1');
+    let articleHeadline = h1El && !h1El.innerText.toLowerCase().includes('yahoo')
       ? h1El.innerText.trim()
       : (cleanTitle && !cleanTitle.toLowerCase().includes('yahoo') ? cleanTitle : 'Market Article');
 
-    // Detect mentioned company or ticker from article
-    let ticker = '';
-    const tickerTag = document.querySelector('a[data-testid="ticker-container"], .yf-quote-tag, a[href*="/quote/"]');
-    if (tickerTag && tickerTag.innerText) {
-      ticker = tickerTag.innerText.replace(/[^A-Za-z0-9.-]/g, '').trim().toUpperCase();
+    // 2. Identify the article container strictly to avoid global #ybar / header market strip
+    const articleContainer = document.querySelector('article, main, .caas-container, .caas-content, #main, [role="main"]') || document.body;
+
+    // 3. Find ticker tags / quote pills inside the article container
+    const articleTickers = [];
+    if (articleContainer) {
+      const quoteLinks = articleContainer.querySelectorAll(
+        '[data-testid="quote-tags"] a, [data-testid="ticker-container"] a, [data-testid="ticker-list"] a, ' +
+        '.caas-ticker-container a, .caas-header a[href*="/quote/"], .yf-quote-tag, a[data-testid="ticker-container"], ' +
+        'a.quote-tag, a[href*="/quote/"]'
+      );
+
+      quoteLinks.forEach((link) => {
+        // Skip any link inside global header/navbar/market overview strip
+        if (link.closest('#ybar, header, nav, .market-strip, [data-module="MarketOverview"], [data-testid="market-indices"], [data-testid="market-strip"], aside, footer')) {
+          return;
+        }
+
+        const href = link.getAttribute('href') || '';
+        const hrefMatch = href.match(/\/quote\/([A-Za-z0-9.%^=-]+)/i);
+        let sym = hrefMatch ? decodeURIComponent(hrefMatch[1]).trim().toUpperCase() : '';
+        if (!sym && link.innerText) {
+          sym = link.innerText.replace(/[^A-Za-z0-9.-]/g, '').trim().toUpperCase();
+        }
+
+        // Filter out market indices and benchmarks
+        if (sym && !this.isMarketIndex(sym, link.innerText) && sym.length <= 6) {
+          if (!articleTickers.includes(sym)) {
+            articleTickers.push(sym);
+          }
+        }
+      });
     }
 
-    // If a stock ticker was identified from the article, resolve the stock company name
-    let companyName = articleHeadline;
-    if (ticker && ticker !== 'ARTICLE') {
-      const knownMatch = Object.values(KNOWN_CIKS).find((k) => k.ticker === ticker);
-      companyName = knownMatch ? knownMatch.company : ticker;
-    } else if (companyName.toLowerCase().includes('yahoo')) {
-      companyName = 'Market Article';
+    // 4. Intelligently determine the PRIMARY subject stock of this article
+    let primaryTicker = '';
+
+    // Check A: Does any article ticker appear in the headline? (e.g. "Was JNJ Stock Rally..." -> JNJ)
+    for (const t of articleTickers) {
+      if (new RegExp(`\\b${t}\\b`, 'i').test(articleHeadline)) {
+        primaryTicker = t;
+        break;
+      }
     }
 
-    // Extract main article body with ads stripped
+    // Check B: Does any company name matching article tickers appear in the headline?
+    if (!primaryTicker) {
+      for (const t of articleTickers) {
+        const meta = this.resolveStockMetadata(t);
+        const coreComp = meta.company.replace(/\s+(Inc\.|Corporation|Corp\.|Company|Co\.|Holdings|plc).*$/i, '').trim();
+        if (coreComp.length > 3 && new RegExp(`\\b${coreComp}\\b`, 'i').test(articleHeadline)) {
+          primaryTicker = t;
+          break;
+        }
+      }
+    }
+
+    // Check C: Headline ticker pattern recognition (e.g. "Was JNJ Stock...", "(JNJ)", "$JNJ", "NYSE: JNJ")
+    if (!primaryTicker) {
+      const explicitMatches = articleHeadline.match(/\b(?:NYSE|NASDAQ|AMEX):\s*([A-Z]{1,5})\b|\(([A-Z]{1,5})\)|\$([A-Z]{1,5})\b/i);
+      if (explicitMatches) {
+        const found = (explicitMatches[1] || explicitMatches[2] || explicitMatches[3] || '').toUpperCase();
+        if (found && !this.isMarketIndex(found) && !COMMON_HEADLINE_WORDS.has(found)) {
+          primaryTicker = found;
+        }
+      }
+    }
+
+    // Check D: Scan uppercase words in the headline against US stocks registry
+    if (!primaryTicker) {
+      const words = articleHeadline.match(/\b[A-Z]{1,5}\b/g) || [];
+      for (const w of words) {
+        const sym = w.toUpperCase();
+        if (!COMMON_HEADLINE_WORDS.has(sym) && !this.isMarketIndex(sym)) {
+          const resolved = this.resolveStockMetadata(sym);
+          if (resolved && resolved.company && resolved.company !== sym) {
+            primaryTicker = sym;
+            break;
+          }
+        }
+      }
+    }
+
+    // Check E: URL path slug check (e.g. /articles/jnj-rally-... or /news/why-jnj-stock-...)
+    if (!primaryTicker && path) {
+      for (const t of articleTickers) {
+        const lowT = t.toLowerCase();
+        if (path.includes(`/${lowT}-`) || path.includes(`-${lowT}-`) || path.includes(`-${lowT}/`)) {
+          primaryTicker = t;
+          break;
+        }
+      }
+    }
+
+    // Check F: First non-index article ticker chip
+    if (!primaryTicker && articleTickers.length > 0) {
+      primaryTicker = articleTickers[0];
+    }
+
+    // Fallback: If no stock could be identified, classify as general Market Analysis
+    if (!primaryTicker) {
+      primaryTicker = 'MARKET';
+    }
+
+    // 5. Resolve Corporate Metadata
+    let primaryCompany = articleHeadline;
+    let exchange = 'News';
+    let cik = '';
+
+    if (primaryTicker && primaryTicker !== 'MARKET' && primaryTicker !== 'ARTICLE') {
+      const meta = this.resolveStockMetadata(primaryTicker);
+      primaryCompany = meta.company || primaryTicker;
+      exchange = meta.exchange || 'NYSE';
+      cik = meta.cik || '';
+    } else {
+      primaryCompany = articleHeadline && !articleHeadline.toLowerCase().includes('yahoo') ? articleHeadline : 'Market Analysis';
+    }
+
+    // 6. Build list of discussed stocks in this article
+    const validStocksMap = new Map();
+    if (primaryTicker && primaryTicker !== 'MARKET') {
+      const pMeta = this.resolveStockMetadata(primaryTicker);
+      validStocksMap.set(primaryTicker, { ticker: primaryTicker, company: pMeta.company, cik: pMeta.cik });
+    }
+    articleTickers.forEach((t) => {
+      if (!validStocksMap.has(t)) {
+        const m = this.resolveStockMetadata(t);
+        validStocksMap.set(t, { ticker: t, company: m.company, cik: m.cik });
+      }
+    });
+    const discussedStocks = Array.from(validStocksMap.values());
+
+    // 7. Extract main article body with ads stripped
     const articleBodyEl = document.querySelector('.caas-body, article, div.body, [data-testid="article-body"], main');
     const sourceEl = articleBodyEl || document.body;
     let articleText = '';
@@ -409,15 +703,17 @@ class FinancialExtractors {
       isFinanceSite: true,
       isReportPage: true,
       siteType: 'yahoo_finance_article',
-      ticker: ticker || 'ARTICLE',
-      company: companyName,
-      exchange: 'News',
+      ticker: primaryTicker,
+      company: primaryCompany,
+      exchange,
+      cik,
       sector: 'Market Analysis',
       formType: 'Market Article',
       filingDate: new Date().toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }),
-      periodBadge: `Article · ${ticker || 'Market'}`,
+      periodBadge: `Article · ${primaryTicker}`,
       headlines: [articleHeadline],
-      fullText: `Article Headline: ${articleHeadline}\n\nArticle Content:\n${articleText.slice(0, 18000)}`,
+      discussedStocks,
+      fullText: `Article Headline: ${articleHeadline}\nSubject Company: ${primaryCompany} (${primaryTicker})\n\nArticle Content:\n${articleText.slice(0, 18000)}`,
     };
   }
 
@@ -1034,7 +1330,8 @@ class FinancialExtractors {
     '.interstitial', '.outstream', '.commercial',
     '.cookie-banner', '.cookie-notice', '.cookie-consent', '.consent-banner',
     '.onetrust-consent-sdk', '#onetrust-banner-sdk', '.qc-cmp-ui-container',
-    'aside', '.sidebar', '.social-share', '.share-buttons', '.social-bar', '.comments', '#comments', '.disqus'
+    'aside', '.sidebar', '.social-share', '.share-buttons', '.social-bar', '.comments', '#comments', '.disqus',
+    '#ybar', '.market-strip', '[data-module="MarketOverview"]', '[data-testid="market-indices"]', '[data-testid="market-strip"]'
   ];
 
   /**
