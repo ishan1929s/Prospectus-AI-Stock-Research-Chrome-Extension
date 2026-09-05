@@ -22,17 +22,24 @@ self.addEventListener('error', (event) => {
 
 // Initialize context menus and alarms on extension install
 chrome.runtime.onInstalled.addListener(async () => {
-  // Context menus
-  chrome.contextMenus.create({
-    id: 'prospectus-explain',
-    title: 'Explain "%s" with Prospectus',
-    contexts: ['selection'],
-  });
+  // Context menus - clear first and handle lastError to avoid duplicate ID errors
+  chrome.contextMenus.removeAll(() => {
+    if (chrome.runtime.lastError) { /* ignore */ }
+    chrome.contextMenus.create({
+      id: 'prospectus-explain',
+      title: 'Explain "%s" with Prospectus',
+      contexts: ['selection'],
+    }, () => {
+      if (chrome.runtime.lastError) { /* ignore */ }
+    });
 
-  chrome.contextMenus.create({
-    id: 'prospectus-save-note',
-    title: 'Save "%s" to Prospectus Notebook',
-    contexts: ['selection'],
+    chrome.contextMenus.create({
+      id: 'prospectus-save-note',
+      title: 'Save "%s" to Prospectus Notebook',
+      contexts: ['selection'],
+    }, () => {
+      if (chrome.runtime.lastError) { /* ignore */ }
+    });
   });
 
   // Watchlist background alarm initialization

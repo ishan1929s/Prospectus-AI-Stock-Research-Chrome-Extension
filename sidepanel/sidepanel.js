@@ -2278,6 +2278,11 @@ document.addEventListener('DOMContentLoaded', async () => {
       });
     }
 
+    // Interactive chart hover tracking (crosshair + tooltip on trend graphs)
+    if (watchlistService && watchlistService.setupChartHoverTracking) {
+      watchlistService.setupChartHoverTracking(container);
+    }
+
     // Card Click to Expand / Collapse Detail Tracker
     container.querySelectorAll('.watchlist-stock-card').forEach((card) => {
       card.addEventListener('click', async (e) => {

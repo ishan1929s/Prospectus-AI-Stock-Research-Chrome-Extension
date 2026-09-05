@@ -1039,7 +1039,7 @@ class WatchlistService {
   /**
    * Helper to fetch JSON via direct fetch or background message proxy with timeout & failover
    */
-  async fetchProxyJSON(url, timeoutMs = 6000) {
+  async fetchProxyJSON(url, timeoutMs = 12000) {
     // 1. Direct fetch (succeeds in extension context: popup, sidepanel, background worker)
     try {
       const controller = typeof AbortController !== 'undefined' ? new AbortController() : null;
@@ -1479,13 +1479,20 @@ class WatchlistService {
               }
             }
 
-            const step = Math.max(1, Math.floor(slicedPoints.length / (isYear ? 52 : 36)));
-            const sampled = [];
-            for (let i = 0; i < slicedPoints.length; i += step) {
-              sampled.push(slicedPoints[i]);
-            }
-            if (sampled[sampled.length - 1] !== slicedPoints[slicedPoints.length - 1]) {
-              sampled.push(slicedPoints[slicedPoints.length - 1]);
+            // For 1Y data, preserve ALL ~252 daily points for pixel-perfect accuracy.
+            // SVGs render 252-point polylines effortlessly (<5KB). For intraday, sample to ~36 points.
+            let sampled;
+            if (isYear) {
+              sampled = slicedPoints;
+            } else {
+              const step = Math.max(1, Math.floor(slicedPoints.length / 36));
+              sampled = [];
+              for (let i = 0; i < slicedPoints.length; i += step) {
+                sampled.push(slicedPoints[i]);
+              }
+              if (sampled[sampled.length - 1] !== slicedPoints[slicedPoints.length - 1]) {
+                sampled.push(slicedPoints[slicedPoints.length - 1]);
+              }
             }
 
             const prices = slicedPoints.map((p) => p.price);
@@ -2150,6 +2157,9 @@ class WatchlistService {
       return { x: Number(x.toFixed(1)), y: Number(y.toFixed(1)), price: p.price, date: p.date, timeStr: p.timeStr };
     });
 
+    // Encode all point coordinates for interactive hover tracking
+    const chartPointsJSON = JSON.stringify(coords.map(c => [c.x, c.y, c.price, c.date || c.timeStr])).replace(/'/g, '&#39;');
+
     const polylinePoints = coords.map((c) => `${c.x},${c.y}`).join(' ');
     const polygonPoints = `${padLeft},${padTop + plotH} ` + polylinePoints + ` ${padLeft + plotW},${padTop + plotH}`;
 
@@ -2199,7 +2209,7 @@ class WatchlistService {
           </div>
         </div>
 
-        <div class="stock-trend-svg-box">
+        <div class="stock-trend-svg-box" data-chart-points='${chartPointsJSON}' data-svg-width="${svgWidth}" data-currency-symbol="${currSym}">
           <svg class="stock-trend-svg" viewBox="0 0 ${svgWidth} ${svgHeight}" preserveAspectRatio="none">
             <defs>
               <linearGradient id="${gradId}" x1="0" y1="0" x2="0" y2="1">
@@ -2223,7 +2233,16 @@ class WatchlistService {
 
             <!-- Timeline Ticks -->
             ${timelineLabels}
+
+            <!-- Interactive hover elements -->
+            <line class="chart-crosshair" x1="0" y1="${padTop}" x2="0" y2="${padTop + plotH}" stroke="#8e8b82" stroke-width="0.8" stroke-dasharray="3,2" style="display:none;pointer-events:none;" />
+            <circle class="chart-hover-dot" cx="0" cy="0" r="3.5" fill="${strokeColor}" stroke="#ffffff" stroke-width="1.5" style="display:none;pointer-events:none;" />
+            <rect class="chart-track-area" x="${padLeft}" y="0" width="${plotW}" height="${svgHeight}" fill="transparent" style="cursor:crosshair;" />
           </svg>
+          <div class="stock-trend-tooltip" style="display:none;">
+            <div class="tooltip-price"></div>
+            <div class="tooltip-date"></div>
+          </div>
         </div>
       </div>
     `;
@@ -2234,6 +2253,73 @@ class WatchlistService {
    */
   render1YearStockTrendHTML(historyData, companyName = '') {
     return this.renderStockTrendHTML(historyData, companyName, '1y');
+  }
+
+  /**
+   * Bind interactive chart hover tracking to all .stock-trend-svg-box elements within a container.
+   * Call after rendering trend HTML into the DOM. Uses event delegation for dynamic content.
+   */
+  setupChartHoverTracking(container) {
+    if (!container || container._chartHoverBound) return;
+    container._chartHoverBound = true;
+
+    const hideAll = () => {
+      container.querySelectorAll('.stock-trend-tooltip').forEach(t => t.style.display = 'none');
+      container.querySelectorAll('.chart-crosshair, .chart-hover-dot').forEach(el => el.style.display = 'none');
+    };
+
+    container.addEventListener('mousemove', (e) => {
+      const svgBox = e.target.closest('.stock-trend-svg-box');
+      if (!svgBox) { hideAll(); return; }
+
+      const svg = svgBox.querySelector('.stock-trend-svg');
+      const tooltip = svgBox.querySelector('.stock-trend-tooltip');
+      const crosshair = svg && svg.querySelector('.chart-crosshair');
+      const hoverDot = svg && svg.querySelector('.chart-hover-dot');
+      if (!svg || !tooltip) return;
+
+      if (!svgBox._chartPts) {
+        try { svgBox._chartPts = JSON.parse((svgBox.dataset.chartPoints || '[]').replace(/&#39;/g, "'")); }
+        catch (ex) { return; }
+      }
+      const pts = svgBox._chartPts;
+      if (!pts.length) return;
+
+      const rect = svg.getBoundingClientRect();
+      const svgW = parseFloat(svgBox.dataset.svgWidth || '360');
+      const mouseX = ((e.clientX - rect.left) / rect.width) * svgW;
+
+      let nearest = pts[0], minDist = Math.abs(pts[0][0] - mouseX);
+      for (let i = 1; i < pts.length; i++) {
+        const d = Math.abs(pts[i][0] - mouseX);
+        if (d < minDist) { minDist = d; nearest = pts[i]; }
+      }
+
+      const currSym = svgBox.dataset.currencySymbol || '$';
+
+      if (crosshair) {
+        crosshair.setAttribute('x1', nearest[0]);
+        crosshair.setAttribute('x2', nearest[0]);
+        crosshair.style.display = '';
+      }
+      if (hoverDot) {
+        hoverDot.setAttribute('cx', nearest[0]);
+        hoverDot.setAttribute('cy', nearest[1]);
+        hoverDot.style.display = '';
+      }
+
+      const priceEl = tooltip.querySelector('.tooltip-price');
+      const dateEl = tooltip.querySelector('.tooltip-date');
+      if (priceEl) priceEl.textContent = `${currSym}${nearest[2]}`;
+      if (dateEl) dateEl.textContent = nearest[3];
+      tooltip.style.display = '';
+
+      const pxX = (nearest[0] / svgW) * rect.width;
+      const boxRect = svgBox.getBoundingClientRect();
+      tooltip.style.left = `${Math.max(0, Math.min(boxRect.width - 95, pxX - 47))}px`;
+    });
+
+    container.addEventListener('mouseleave', () => { hideAll(); }, true);
   }
 
   /**

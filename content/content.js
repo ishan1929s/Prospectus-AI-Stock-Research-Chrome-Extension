@@ -2901,6 +2901,11 @@
         });
       }
 
+      // Interactive chart hover tracking (crosshair + tooltip on trend graphs)
+      if (this.watchlistService && this.watchlistService.setupChartHoverTracking) {
+        this.watchlistService.setupChartHoverTracking(container);
+      }
+
       // Card Click to Expand / Collapse Detail Tracker
       container.querySelectorAll('.watchlist-stock-card').forEach((card) => {
         card.addEventListener('click', async (e) => {
