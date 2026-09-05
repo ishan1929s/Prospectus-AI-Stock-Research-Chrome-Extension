@@ -56,7 +56,7 @@
             </svg>
             <span>License Active · Unlimited Analyses</span>
           </div>
-          <p class="license-active-desc">Your activation key is verified and safely stored. Key entry has been removed.</p>
+          <p class="license-active-desc">Your activation key is verified and safely stored.</p>
         </div>
         <button id="btn-deactivate-license" class="btn-secondary btn-sm" type="button">Deactivate / Change Key</button>
       </div>
@@ -101,6 +101,66 @@
       <div class="form-group" id="group-custom-endpoint" style="display: none;">
         <label for="custom-endpoint-input">Custom Base URL</label>
         <input type="text" id="custom-endpoint-input" placeholder="http://localhost:11434/v1/chat/completions" class="text-input" />
+      </div>
+
+      <div class="form-group" id="group-analysis-mode">
+        <label>Analysis &amp; Token Mode</label>
+        <div class="analysis-mode-grid" id="analysis-mode-cards">
+          <!-- Fast Mode Card -->
+          <div class="analysis-mode-card active" data-mode="fast" id="mode-card-fast">
+            <div class="mode-card-top">
+              <div class="mode-header-left">
+                <div class="mode-icon-box mode-icon-fast">
+                  <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+                    <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"></polygon>
+                  </svg>
+                </div>
+                <div>
+                  <div class="mode-name">Fast Mode</div>
+                  <div class="mode-sub">Token-Saver · ~4s latency</div>
+                </div>
+              </div>
+              <div class="mode-pill-radio">
+                <span class="mode-tag tag-default">Default</span>
+                <div class="mode-radio-circle"></div>
+              </div>
+            </div>
+            <p class="mode-desc">
+              Optimizes prompt density and limits completion tokens. Rapid extraction and highlights in ~4s with ~60% fewer tokens.
+            </p>
+          </div>
+
+          <!-- Deep Mode Card -->
+          <div class="analysis-mode-card" data-mode="deep" id="mode-card-deep">
+            <div class="mode-card-top">
+              <div class="mode-header-left">
+                <div class="mode-icon-box mode-icon-deep">
+                  <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <path d="M6 18h8M3 22h18M14 22a7 7 0 1 0 0-14h-1V3l-5 5 5 5V9h1a5 5 0 0 1 0 10"/>
+                    <circle cx="9" cy="9" r="2"/>
+                  </svg>
+                </div>
+                <div>
+                  <div class="mode-name">Institutional Deep</div>
+                  <div class="mode-sub">Exhaustive Context</div>
+                </div>
+              </div>
+              <div class="mode-pill-radio">
+                <span class="mode-tag tag-deep">Multi-Page</span>
+                <div class="mode-radio-circle"></div>
+              </div>
+            </div>
+            <p class="mode-desc">
+              Comprehensive multi-page context, forensic risk evaluation, and maximum analytical depth for full diligence.
+            </p>
+          </div>
+        </div>
+
+        <select id="analysis-mode-select" style="display: none;">
+          <option value="fast" selected>fast</option>
+          <option value="deep">deep</option>
+        </select>
+        <span class="field-hint">Fast Mode optimizes speed and saves tokens. Institutional Deep maximizes analytical granularity across all filings.</span>
       </div>
 
       <div class="form-group">

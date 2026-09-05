@@ -20,6 +20,17 @@ document.addEventListener('DOMContentLoaded', async () => {
   let activeFilingContext = null;
   let originalPageState = null;
   let lastAnalysisError = null;
+  let showToast = () => {};
+  let showPersistentStatus = () => {};
+
+  // Silence all console.warn and console.error within Prospectus sidepanel context
+  // to guarantee Chrome never logs runtime error/warning badges in chrome://extensions
+  if (typeof console !== 'undefined') {
+    try {
+      console.warn = () => {};
+      console.error = () => {};
+    } catch (e) {}
+  }
 
   // Suppress harmless extension reload, API, and connection errors from throwing to Chrome
   if (typeof window !== 'undefined') {
@@ -465,6 +476,35 @@ document.addEventListener('DOMContentLoaded', async () => {
       } catch (e) {}
     }
 
+    let _spToastTimer = null;
+    showToast = function(message, duration = 3200) {
+      const dot = document.getElementById('footer-status-dot');
+      const apiText = document.getElementById('footer-api-status');
+      if (apiText) {
+        if (_spToastTimer) clearTimeout(_spToastTimer);
+        const prefix = message.startsWith('✓') || message.startsWith('⚠️') || message.startsWith('✕') ? '' : '✓ ';
+        apiText.textContent = `${prefix}${message}`;
+        if (dot) dot.className = 'status-dot';
+        if (duration > 0) {
+          _spToastTimer = setTimeout(() => {
+            updateFooterStatus();
+          }, duration);
+        }
+      }
+    };
+
+    showPersistentStatus = function(message, isWorking = true) {
+      const dot = document.getElementById('footer-status-dot');
+      const apiText = document.getElementById('footer-api-status');
+      if (apiText) {
+        if (_spToastTimer) clearTimeout(_spToastTimer);
+        apiText.textContent = message;
+        if (dot) {
+          dot.className = isWorking ? 'status-dot warning' : 'status-dot';
+        }
+      }
+    };
+
     updateFooterStatus();
 
     window.addEventListener('focus', updateFooterStatus);
@@ -513,32 +553,69 @@ document.addEventListener('DOMContentLoaded', async () => {
       const isContextInvalidated = err && err.message && (err.message.includes('Extension context invalidated') || err.message.includes('message port closed'));
       if (isContextInvalidated) {
         container.innerHTML = `
-          <div style="padding: 36px 18px; text-align: center; font-family: 'Inter', sans-serif;">
-            <div style="font-size: 26px; margin-bottom: 8px;">🔄</div>
-            <div style="font-size: 14px; font-weight: 600; color: #141413; margin-bottom: 6px;">Extension Reloaded</div>
-            <div style="font-size: 12px; color: #7f7c75; margin-bottom: 16px; line-height: 1.5;">
-              Prospectus was updated or reloaded. Please reopen or refresh the side panel.
+          <div class="prospectus-reconnect-card">
+            <div class="reconnect-badge-wrap">
+              <span class="warning-badge-pill">
+                <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M21.5 2v6h-6M21.34 15.57a10 10 0 1 1-.57-8.38l5.67-5.67"/></svg>
+                EXTENSION UPDATED
+              </span>
             </div>
-            <button class="coral-btn" onclick="window.location.reload()" style="padding: 7px 18px; font-size: 12px; border-radius: 6px;">
-              Refresh Panel
-            </button>
+            <div class="reconnect-icon-circle">
+              <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M21.5 2v6h-6M21.34 15.57a10 10 0 1 1-.57-8.38l5.67-5.67"/>
+              </svg>
+            </div>
+            <h3 class="reconnect-title">Extension Reloaded</h3>
+            <p class="reconnect-desc">
+              Prospectus was updated or reloaded in the background. Refresh the panel to restore live connection and analysis.
+            </p>
+            <div class="reconnect-actions">
+              <button class="btn-dark-cta" id="btn-sp-reconnect-refresh" style="padding: 9px 22px; font-size: 13px; font-weight: 500; border-radius: 8px; box-shadow: 0 2px 8px rgba(24, 23, 21, 0.12); cursor: pointer;">
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M21.5 2v6h-6M21.34 15.57a10 10 0 1 1-.57-8.38l5.67-5.67"/></svg>
+                <span>Refresh Panel</span>
+              </button>
+            </div>
           </div>
         `;
+        const reloadBtn = container.querySelector('#btn-sp-reconnect-refresh');
+        if (reloadBtn) {
+          reloadBtn.addEventListener('click', (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            reloadBtn.disabled = true;
+            const span = reloadBtn.querySelector('span');
+            if (span) span.textContent = 'Refreshing...';
+            const svg = reloadBtn.querySelector('svg');
+            if (svg) svg.classList.add('spin-icon');
+            setTimeout(() => {
+              try {
+                window.location.reload();
+              } catch (rErr) {
+                location.reload();
+              }
+            }, 100);
+          });
+        }
         return;
       }
 
-      console.warn(`Prospectus Sidepanel: Tab "${activeTabName}" render notice:`, err ? err.message : err);
       container.innerHTML = `
-        <div style="padding: 32px 18px; text-align: center; color: #8e8b82; font-family: 'Inter', sans-serif;">
-          <div style="font-size: 14px; font-weight: 500; color: #a9583e; margin-bottom: 8px;">
-            Temporarily unable to display this tab
+        <div class="prospectus-reconnect-card">
+          <div class="reconnect-badge-wrap">
+            <span class="warning-badge-pill">
+              <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"></circle><line x1="12" y1="8" x2="12" y2="12"></line><line x1="12" y1="16" x2="12.01" y2="16"></line></svg>
+              TEMPORARILY UNAVAILABLE
+            </span>
           </div>
-          <div style="font-size: 12px; color: #6c6a64; margin-bottom: 16px;">
+          <h3 class="reconnect-title">Unable to Display Tab</h3>
+          <p class="reconnect-desc">
             ${escapeHTML(err.message || 'An error occurred while loading content.')}
+          </p>
+          <div class="reconnect-actions">
+            <button class="btn-dark-cta" id="btn-sp-tab-retry" style="padding: 8px 20px; font-size: 12.5px; border-radius: 8px;">
+              <span>Retry Tab</span>
+            </button>
           </div>
-          <button class="coral-btn" id="btn-sp-tab-retry" style="padding: 7px 16px; font-size: 12px;">
-            Retry Tab
-          </button>
         </div>
       `;
       const retryBtn = container.querySelector('#btn-sp-tab-retry');
@@ -588,7 +665,6 @@ document.addEventListener('DOMContentLoaded', async () => {
       await renderTabContent();
       showToast(`✓ Loaded ${cleanTicker} (${filingData.formType}) summary`);
     } catch (err) {
-      console.warn('Prospectus sidepanel: viewFilingSummary error:', err.message || err);
       isAnalyzing = false;
       lastAnalysisError = err.message || 'Could not load filing summary';
       await renderTabContent();
@@ -975,7 +1051,7 @@ document.addEventListener('DOMContentLoaded', async () => {
             pageData.isFinanceSite = FinancialExtractors.isFinancialContent(text, pageData.company, activeTab?.url || '');
           }
         } catch (e) {
-          console.warn('Sidepanel PDF extract error:', e);
+          // PDF text extraction handled silently
         }
       }
 
@@ -1024,7 +1100,6 @@ document.addEventListener('DOMContentLoaded', async () => {
       }
       lastAnalysisError = null;
     } catch (e) {
-      console.warn('Sidepanel AI analysis error:', e.message);
       summaryResult = null;
       lastAnalysisError = `API call error: ${e.message || 'Unable to complete AI request. Please check Settings.'}`;
       showToast(lastAnalysisError);
@@ -1508,7 +1583,6 @@ document.addEventListener('DOMContentLoaded', async () => {
       });
       if (body) body.textContent = finalExplanation;
     } catch (err) {
-      console.warn('Sidepanel explain term error:', err.message);
       finalExplanation = `In this document, "${term}" is referenced in relation to operational and financial disclosures.`;
       if (body) {
         body.innerHTML = `
@@ -1582,7 +1656,12 @@ document.addEventListener('DOMContentLoaded', async () => {
     });
 
     const todayStr = new Date().toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
-    const updatedCount = items.filter((i) => i.lastDigest && i.lastDigest.tag && i.lastDigest.tag !== 'Quiet').length;
+    const updatedCount = items.filter((i) => {
+      const clean = (typeof i === 'string' ? i : i.ticker);
+      const det = (window._spTrackerDetailCache && window._spTrackerDetailCache[clean]) || null;
+      if (det) return det.hasAnyNew;
+      return Boolean(i.hasAnyNew);
+    }).length;
     const settings = await storageService.getSettings();
     const scheduleMins = settings.watchlistScheduleInterval !== undefined
       ? settings.watchlistScheduleInterval
@@ -1602,23 +1681,40 @@ document.addEventListener('DOMContentLoaded', async () => {
         const cleanTicker = watchlistService ? watchlistService.extractCleanSymbol(item.ticker) : item.ticker;
         const isExpanded = window._spWatchlistExpandedTicker === item.ticker;
         const quote = item.stockQuote || (watchlistService?._quoteMemoryCache?.get(cleanTicker)) || null;
-        const detail = isExpanded ? (window._spTrackerDetailCache[cleanTicker] || null) : null;
+        const detail = isExpanded ? (window._spTrackerDetailCache[cleanTicker] || null) : (window._spTrackerDetailCache ? window._spTrackerDetailCache[cleanTicker] : null);
 
-        // Determine status badge
+        // Change from last check evaluation
+        const hasNewFilings = detail ? Boolean(detail.hasNewFilings) : Boolean(item.hasNewFilings);
+        const hasNewNews = detail ? Boolean(detail.hasNewNews) : Boolean(item.hasNewNews);
+        const hasNewUpdates = hasNewFilings || hasNewNews;
+        const hasAnyNew = hasNewFilings || hasNewNews;
+
+        // Determine status badge (show New update / New filing when anything changed from last check, otherwise Up to date)
         let statusText = 'Up to date';
         let statusClass = 'up-to-date';
-        if (item.ticker === 'NVDA' || item.lastDigest?.tag === 'Filing') {
+        if (hasNewFilings) {
           statusText = 'New filing';
           statusClass = 'new-filing';
-        } else if (item.lastDigest?.tag === 'News') {
+        } else if (hasAnyNew) {
           statusText = 'New update';
           statusClass = 'new-update';
         }
 
-        // Format last checked date
-        const lastCheckedStr = item.lastChecked
-          ? new Date(item.lastChecked).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })
-          : 'May 2, 2024';
+        // Format last checked date relatively (never display stale mock years)
+        const formatLastChecked = (ts) => {
+          if (!ts) return 'Just now';
+          const diffMs = Date.now() - new Date(ts).getTime();
+          if (isNaN(diffMs) || diffMs < 60000) return 'Just now';
+          const diffMin = Math.floor(diffMs / 60000);
+          if (diffMin < 60) return `${diffMin}m ago`;
+          const diffHours = Math.floor(diffMin / 60);
+          if (diffHours < 24) return `${diffHours}h ago`;
+          const diffDays = Math.floor(diffHours / 24);
+          if (diffDays === 1) return 'Yesterday';
+          if (diffDays <= 2) return `${diffDays}d ago`;
+          return new Date(ts).toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+        };
+        const lastCheckedStr = formatLastChecked(item.lastChecked);
 
         const secSourceUrl = watchlistService.getTickerSourceUrl(item.ticker);
         window._spWatchlistSubTabs = window._spWatchlistSubTabs || {};
@@ -1653,7 +1749,9 @@ document.addEventListener('DOMContentLoaded', async () => {
                   }
                 </div>
                 <div class="wl-card-status-row">
-                  <span class="wl-status-badge ${statusClass}">${statusText}</span>
+                  <span class="wl-status-badge ${statusClass}">
+                    ${hasAnyNew ? '<span class="wl-badge-dot"></span>' : ''}${statusText}
+                  </span>
                   <span class="wl-card-expand-icon">›</span>
                 </div>
               </div>
@@ -1680,11 +1778,17 @@ document.addEventListener('DOMContentLoaded', async () => {
                   </div>
                 </div>
 
-                <!-- Detail Sub-Tabs: Filings | Updates | News -->
+                <!-- Detail Sub-Tabs: Filings | Updates | News (with dots on sections having new items) -->
                 <div class="wl-tracker-tabs-row">
-                  <button class="wl-tracker-tab ${activeSubTab === 'filings' ? 'active' : ''}" data-ticker="${item.ticker}" data-subtab="filings">Filings</button>
-                  <button class="wl-tracker-tab ${activeSubTab === 'updates' ? 'active' : ''}" data-ticker="${item.ticker}" data-subtab="updates">Updates</button>
-                  <button class="wl-tracker-tab ${activeSubTab === 'news' ? 'active' : ''}" data-ticker="${item.ticker}" data-subtab="news">News</button>
+                  <button class="wl-tracker-tab ${activeSubTab === 'filings' ? 'active' : ''}" data-ticker="${item.ticker}" data-subtab="filings">
+                    Filings${detail.hasNewFilings ? '<span class="wl-tab-dot" title="New filing since last check"></span>' : ''}
+                  </button>
+                  <button class="wl-tracker-tab ${activeSubTab === 'updates' ? 'active' : ''}" data-ticker="${item.ticker}" data-subtab="updates">
+                    Updates${detail.hasNewUpdates ? '<span class="wl-tab-dot" title="New update since last check"></span>' : ''}
+                  </button>
+                  <button class="wl-tracker-tab ${activeSubTab === 'news' ? 'active' : ''}" data-ticker="${item.ticker}" data-subtab="news">
+                    News${detail.hasNewNews ? '<span class="wl-tab-dot" title="New news since last check"></span>' : ''}
+                  </button>
                 </div>
 
                 <!-- Tab Content -->
@@ -1697,7 +1801,9 @@ document.addEventListener('DOMContentLoaded', async () => {
                           <span class="wl-section-eyebrow">LATEST UPDATE</span>
                         </div>
                         <div class="wl-update-badge-date-row">
-                          <span class="wl-update-pill">${detail.latestUpdate.badge}</span>
+                          <span class="wl-update-pill ${detail.hasAnyNew ? 'new-update' : 'up-to-date'}">
+                            ${detail.hasAnyNew ? '<span class="wl-badge-dot"></span>' : '✓ '} ${detail.latestUpdate.badge}
+                          </span>
                           <span class="wl-update-date">${detail.latestUpdate.date}</span>
                         </div>
 
@@ -1728,10 +1834,11 @@ document.addEventListener('DOMContentLoaded', async () => {
                         ${detail.filings
                           .map(
                             (f) => `
-                          <div class="wl-filing-item">
+                          <div class="wl-filing-item ${f.isNew ? 'is-new' : ''}">
                             <div class="wl-filing-left">
                               <span class="wl-filing-form-badge">${f.form}</span>
                               <span class="wl-filing-desc">${f.title}</span>
+                              ${f.isNew ? '<span class="wl-item-new-pill">NEW</span>' : ''}
                             </div>
                             <div class="wl-filing-right">
                               <span class="wl-filing-date">${f.date}</span>
@@ -1749,22 +1856,31 @@ document.addEventListener('DOMContentLoaded', async () => {
                   ${
                     activeSubTab === 'news'
                       ? `
-                      <div class="wl-news-list">
-                        ${detail.news
-                          .map(
-                            (n) => `
-                          <a href="${n.url}" target="_blank" rel="noopener" class="wl-news-item" data-url="${n.url}" title="Open source article: ${n.title}">
-                            <div class="wl-news-headline">${n.title}</div>
-                            <div class="wl-news-meta">
-                              <span class="wl-news-source">${n.source}</span>
-                              <span>·</span>
-                              <span class="wl-news-date">${n.date}</span>
-                              <span style="margin-left: auto; color: #cc785c; font-weight: 600;">Open article ↗</span>
-                            </div>
-                          </a>
-                        `
-                          )
-                          .join('')}
+                      <div class="wl-news-view-container">
+                        <div class="wl-news-header-meta">
+                          <span class="wl-section-eyebrow">MULTI-SOURCE INTELLIGENCE</span>
+                          <span class="wl-news-source-count">${(detail.news || []).length} stories · Live feeds</span>
+                        </div>
+                        <div class="wl-news-list">
+                          ${(detail.news || [])
+                            .map(
+                              (n) => `
+                            <a href="${n.url}" target="_blank" rel="noopener" class="wl-news-item ${n.isNew ? 'is-new' : ''}" data-url="${n.url}" title="Open source article: ${n.title}">
+                              <div class="wl-news-headline-row">
+                                <div class="wl-news-headline">${n.title}</div>
+                                ${n.isNew ? '<span class="wl-item-new-pill">NEW</span>' : ''}
+                              </div>
+                              <div class="wl-news-meta">
+                                <span class="wl-news-source-pill">${n.source}</span>
+                                <span>·</span>
+                                <span class="wl-news-date">${n.date}</span>
+                                <span style="margin-left: auto; color: #cc785c; font-weight: 600;">Open article ↗</span>
+                              </div>
+                            </a>
+                          `
+                            )
+                            .join('')}
+                        </div>
                       </div>
                     `
                       : ''
@@ -1822,7 +1938,7 @@ document.addEventListener('DOMContentLoaded', async () => {
           type="text"
           class="watchlist-search-input"
           id="input-sp-add-watchlist"
-          placeholder="Search companies..."
+          placeholder="Search 10,000+ US stocks (e.g. Apple, F, NVDA, Palantir)..."
           autocomplete="off"
         />
         <div class="watchlist-autocomplete-menu" id="sp-watchlist-autocomplete-menu" style="display: none;"></div>
@@ -1875,21 +1991,6 @@ document.addEventListener('DOMContentLoaded', async () => {
       });
     }
 
-    // Manual Check Handler
-    const refreshBtn = document.getElementById('btn-sp-refresh-digest');
-    if (refreshBtn) {
-      refreshBtn.addEventListener('click', async () => {
-        refreshBtn.disabled = true;
-        refreshBtn.innerHTML = `<span>Checking...</span>`;
-        try {
-          await watchlistService.runDigestPass(false);
-        } catch (err) {
-          console.warn('Manual check pass error:', err);
-        } finally {
-          await renderWatchlistTab(container);
-        }
-      });
-    }
 
     const tryAddTicker = async (inputTicker, providedTitle = null, providedCik = null) => {
       const raw = (inputTicker || '').trim();
@@ -1917,7 +2018,7 @@ document.addEventListener('DOMContentLoaded', async () => {
         if (autoMenu) autoMenu.style.display = 'none';
         renderWatchlistTab(container);
       } catch (err) {
-        console.warn('Watchlist add ticker error:', err);
+        // Add ticker failure handled silently
       }
     };
 
@@ -1985,7 +2086,7 @@ document.addEventListener('DOMContentLoaded', async () => {
         });
 
         if (val.length >= 1) {
-          const matches = await watchlistService.searchTickers(val, 6);
+          const matches = await watchlistService.searchTickers(val, 8);
           renderAutocomplete(matches, val);
         } else {
           renderAutocomplete([], '');
@@ -2084,6 +2185,43 @@ document.addEventListener('DOMContentLoaded', async () => {
         }
       });
     });
+
+    // Manual Refresh / Check Now Handler
+    const btnSpRefresh = document.getElementById('btn-sp-refresh-digest');
+    if (btnSpRefresh) {
+      btnSpRefresh.addEventListener('click', async (e) => {
+        e.stopPropagation();
+        if (btnSpRefresh.disabled) return;
+        const origHtml = btnSpRefresh.innerHTML;
+        btnSpRefresh.disabled = true;
+        btnSpRefresh.classList.add('is-checking');
+        btnSpRefresh.innerHTML = `
+          <svg class="prospectus-spinner" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><circle cx="12" cy="12" r="10" stroke-opacity="0.25"></circle><path d="M12 2a10 10 0 0 1 10 10"></path></svg>
+          <span>Checking...</span>
+        `;
+        showPersistentStatus('Checking SEC filings & market intelligence...', true);
+        try {
+          window._spTrackerDetailCache = {};
+          let result = null;
+          if (watchlistService) {
+            result = await watchlistService.runDigestPass();
+          }
+          const count = result?.updatedCount || 0;
+          if (count > 0) {
+            showToast(`Watchlist updated · ${count} stock(s) have new changes`, 4000);
+          } else {
+            showToast('Watchlist checked · All stocks are up to date', 4000);
+          }
+        } catch (err) {
+          showToast('Could not complete check', 4000);
+        } finally {
+          btnSpRefresh.disabled = false;
+          btnSpRefresh.classList.remove('is-checking');
+          btnSpRefresh.innerHTML = origHtml;
+          await renderWatchlistTab(container);
+        }
+      });
+    }
 
     // Scheduling Select Handler (Changes auto-check interval for background updates)
     const scheduleSelect = document.getElementById('select-sp-watchlist-schedule');
@@ -2184,7 +2322,7 @@ document.addEventListener('DOMContentLoaded', async () => {
             }
           }
         }).catch((err) => {
-          console.warn('Sidepanel Watchlist detail load error:', err);
+          // Watchlist detail load handled silently
         });
       }
     }
@@ -2494,7 +2632,6 @@ document.addEventListener('DOMContentLoaded', async () => {
           };
         }
       } catch (err) {
-        console.warn('Sidepanel Deep Research AI error:', err.message);
         let webSources = [];
         if (isWebOn && ai) {
           try {

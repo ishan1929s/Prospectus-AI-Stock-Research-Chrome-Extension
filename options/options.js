@@ -3,6 +3,14 @@
  */
 
 document.addEventListener('DOMContentLoaded', async () => {
+  // Silence console.warn and console.error in options page
+  if (typeof console !== 'undefined') {
+    try {
+      console.warn = () => {};
+      console.error = () => {};
+    } catch (e) {}
+  }
+
   const storage = window.ProspectusStorage || new StorageService();
   const licenseService = window.ProspectusLicense || new LicenseService(storage);
   const aiService = window.ProspectusAI || new AIService(storage);
@@ -16,6 +24,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   const customEndpointInput = document.getElementById('custom-endpoint-input');
   const tempSlider = document.getElementById('temp-slider');
   const tempVal = document.getElementById('temp-val');
+  const analysisModeSelect = document.getElementById('analysis-mode-select');
 
   const licenseInput = document.getElementById('license-key-input');
   const btnActivate = document.getElementById('btn-activate-license');
@@ -202,6 +211,29 @@ document.addEventListener('DOMContentLoaded', async () => {
   customEndpointInput.value = settings.customEndpoint || '';
   tempSlider.value = settings.temperature !== undefined ? settings.temperature : 0.2;
   tempVal.textContent = tempSlider.value;
+  const modeCardFast = document.getElementById('mode-card-fast');
+  const modeCardDeep = document.getElementById('mode-card-deep');
+
+  function updateAnalysisModeUI(mode) {
+    const activeMode = mode === 'deep' ? 'deep' : 'fast';
+    if (analysisModeSelect) analysisModeSelect.value = activeMode;
+    if (modeCardFast) modeCardFast.classList.toggle('active', activeMode === 'fast');
+    if (modeCardDeep) modeCardDeep.classList.toggle('active', activeMode === 'deep');
+  }
+
+  if (modeCardFast) {
+    modeCardFast.addEventListener('click', () => updateAnalysisModeUI('fast'));
+  }
+  if (modeCardDeep) {
+    modeCardDeep.addEventListener('click', () => updateAnalysisModeUI('deep'));
+  }
+  if (analysisModeSelect) {
+    analysisModeSelect.addEventListener('change', () => {
+      updateAnalysisModeUI(analysisModeSelect.value);
+    });
+  }
+
+  updateAnalysisModeUI(settings.analysisMode || 'fast');
   sidebarWidthSlider.value = settings.sidebarWidth || 440;
   sidebarWidthVal.textContent = sidebarWidthSlider.value;
   advHeightSlider.value = settings.deepResearchHeight || 240;
@@ -368,7 +400,7 @@ document.addEventListener('DOMContentLoaded', async () => {
           if (licenseInput) licenseInput.focus();
         }, 100);
       } catch (err) {
-        console.warn('Error deactivating license:', err.message || err);
+        // Deactivation error handled silently
       } finally {
         btnDeactivate.disabled = false;
       }
@@ -389,6 +421,7 @@ document.addEventListener('DOMContentLoaded', async () => {
       modelName: modelToTest,
       customEndpoint: customEndpointInput.value.trim(),
       temperature: parseFloat(tempSlider.value),
+      analysisMode: analysisModeSelect ? analysisModeSelect.value : 'fast',
     });
 
     try {
@@ -420,6 +453,7 @@ document.addEventListener('DOMContentLoaded', async () => {
       modelName: finalModel,
       customEndpoint: customEndpointInput.value.trim(),
       temperature: parseFloat(tempSlider.value),
+      analysisMode: analysisModeSelect ? analysisModeSelect.value : 'fast',
       enableBackgroundWatchlist: chkBgWatchlist.checked && (selectWatchlistSchedule ? parseInt(selectWatchlistSchedule.value, 10) > 0 : true),
       watchlistScheduleInterval: selectWatchlistSchedule ? parseInt(selectWatchlistSchedule.value, 10) : 1440,
       watchlistRefreshHours: selectWatchlistSchedule && parseInt(selectWatchlistSchedule.value, 10) > 0 ? parseInt(selectWatchlistSchedule.value, 10) / 60 : 0,

@@ -9,6 +9,7 @@ const DEFAULT_SETTINGS = {
   modelName: 'claude-sonnet-5',
   customEndpoint: '',
   temperature: 0.2,
+  analysisMode: 'fast', // 'fast' (Token-Saver) | 'deep' (Institutional Deep)
   licenseKey: '',
   isLicensed: false,
   enableBackgroundWatchlist: true,
@@ -163,7 +164,7 @@ class StorageService {
           localStorage.setItem(`prospectus_${k}`, JSON.stringify(v));
         }
       } catch (e) {
-        console.warn('Fallback storage set warning:', e.message);
+        // Fallback storage failure handled silently
       }
     }
   }

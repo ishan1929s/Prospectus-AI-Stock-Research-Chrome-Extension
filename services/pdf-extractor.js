@@ -191,7 +191,7 @@ class PDFExtractor {
       const arrayBuf = await res.arrayBuffer();
       return await this.extractText(arrayBuf);
     } catch (err) {
-      console.warn('PDFExtractor: Direct fetch failed, trying proxy:', err.message);
+      // Direct fetch failed
       return '';
     }
   }

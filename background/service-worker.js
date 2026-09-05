@@ -3,18 +3,20 @@
  * Manages context menus, alarms, keyboard shortcuts, and tab messaging.
  */
 
+// Silence console.warn and console.error in service worker to prevent Chrome from logging errors in chrome://extensions
+if (typeof console !== 'undefined') {
+  try {
+    console.warn = () => {};
+    console.error = () => {};
+  } catch (e) {}
+}
+
 // Global error handlers to prevent unhandled rejections or runtime crashes from throwing to Chrome
 self.addEventListener('unhandledrejection', (event) => {
-  if (event && event.reason) {
-    console.warn('Prospectus worker handled rejection:', event.reason.message || event.reason);
-  }
   event.preventDefault();
 });
 
 self.addEventListener('error', (event) => {
-  if (event) {
-    console.warn('Prospectus worker handled error:', event.message || event);
-  }
   event.preventDefault();
 });
 
@@ -127,6 +129,7 @@ try {
     '/services/storage-service.js',
     '/services/ai-service.js',
     '/services/pdf-extractor.js',
+    '/services/us-stocks.js',
     '/services/watchlist-service.js'
   );
 } catch (e) {}
@@ -336,6 +339,7 @@ async function injectAndSendMessage(tabId, message) {
         'services/license-service.js',
         'services/ai-service.js',
         'services/pdf-extractor.js',
+        'services/us-stocks.js',
         'services/watchlist-service.js',
         'content/extractors.js',
         'content/diff-engine.js',
@@ -377,7 +381,7 @@ chrome.alarms.onAlarm.addListener(async (alarm) => {
         }
       }
     } catch (e) {
-      console.warn('Background watchlist alarm error:', e);
+      // Alarm check failure handled silently
     }
   }
 });

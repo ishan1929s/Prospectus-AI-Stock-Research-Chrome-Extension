@@ -999,7 +999,7 @@ class FinancialExtractors {
             }
           }
         } catch (e) {
-          console.warn('Prospectus: extractEmbeddedDocumentsAsync error for', doc.url, e);
+          // Ignore embedded doc extraction errors silently
         }
       }
     }

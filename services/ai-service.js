@@ -107,30 +107,35 @@ class AIService {
       model: this._normalizeModel(provider, settings.modelName || 'claude-sonnet-5'),
       customEndpoint: (settings.customEndpoint || '').trim(),
       temperature: typeof settings.temperature === 'number' ? settings.temperature : 0.2,
+      analysisMode: settings.analysisMode || 'fast',
     };
   }
 
   /**
    * Generic LLM Chat Completion Dispatcher
    */
-  async callLLM({ systemPrompt = SYSTEM_COMPLIANCE_PROMPT, userPrompt, jsonMode = false }) {
+  async callLLM({ systemPrompt = SYSTEM_COMPLIANCE_PROMPT, userPrompt, jsonMode = false, maxTokens = null }) {
     const creds = await this.getCredentials();
     if (!creds.apiKey && creds.provider !== 'custom') {
       throw new Error(`Please enter your ${creds.provider.toUpperCase()} API key in Prospectus Settings.`);
     }
 
+    const effectiveMaxTokens = typeof maxTokens === 'number'
+      ? maxTokens
+      : (creds.analysisMode === 'deep' ? 1400 : 750);
+
     switch (creds.provider) {
       case 'anthropic':
-        return await this._callAnthropic({ creds, systemPrompt, userPrompt });
+        return await this._callAnthropic({ creds, systemPrompt, userPrompt, maxTokens: effectiveMaxTokens });
       case 'gemini':
-        return await this._callGemini({ creds, systemPrompt, userPrompt, jsonMode });
+        return await this._callGemini({ creds, systemPrompt, userPrompt, jsonMode, maxTokens: effectiveMaxTokens });
       case 'openrouter':
-        return await this._callOpenRouter({ creds, systemPrompt, userPrompt, jsonMode });
+        return await this._callOpenRouter({ creds, systemPrompt, userPrompt, jsonMode, maxTokens: effectiveMaxTokens });
       case 'custom':
-        return await this._callCustom({ creds, systemPrompt, userPrompt, jsonMode });
+        return await this._callCustom({ creds, systemPrompt, userPrompt, jsonMode, maxTokens: effectiveMaxTokens });
       case 'openai':
       default:
-        return await this._callOpenAI({ creds, systemPrompt, userPrompt, jsonMode });
+        return await this._callOpenAI({ creds, systemPrompt, userPrompt, jsonMode, maxTokens: effectiveMaxTokens });
     }
   }
 
@@ -191,7 +196,7 @@ class AIService {
           throw new Error(response?.error || 'Background fetch proxy failed');
         }
       } catch (proxyErr) {
-        console.warn('Prospectus: Background proxy fetch failed, attempting direct fetch:', proxyErr.message);
+        // Fall back to direct fetch if background proxy fails
       }
     }
 
@@ -206,11 +211,11 @@ class AIService {
   }
 
   // --- OpenAI Client ---
-  async _callOpenAI({ creds, systemPrompt, userPrompt, jsonMode }) {
+  async _callOpenAI({ creds, systemPrompt, userPrompt, jsonMode, maxTokens = null }) {
     const endpoint = 'https://api.openai.com/v1/chat/completions';
     const primaryModel = this._normalizeModel('openai', creds.model || 'gpt-5.4-mini');
 
-    const sendRequest = async (modelToUse) => {
+    const sendRequest = async (modelToUse, useCompletionTokens = false) => {
       const payload = {
         model: modelToUse,
         messages: [
@@ -219,6 +224,13 @@ class AIService {
         ],
         temperature: creds.temperature,
       };
+      if (typeof maxTokens === 'number') {
+        if (useCompletionTokens) {
+          payload.max_completion_tokens = maxTokens;
+        } else {
+          payload.max_tokens = maxTokens;
+        }
+      }
       if (jsonMode) {
         payload.response_format = { type: 'json_object' };
       }
@@ -233,16 +245,20 @@ class AIService {
       });
     };
 
-    let res = await sendRequest(primaryModel);
+    let res = await sendRequest(primaryModel, false);
 
-    // Resilience fallback if selected preview model is not yet permitted on user API tier
-    if (!res.ok && (res.status === 404 || res.status === 400)) {
+    // If newer OpenAI reasoning models reject max_tokens in favor of max_completion_tokens
+    if (!res.ok && res.status === 400 && typeof maxTokens === 'number') {
       const errData = await res.json().catch(() => ({}));
       const errMsg = (errData.error?.message || '').toLowerCase();
-      if (errMsg.includes('model') && (errMsg.includes('does not exist') || errMsg.includes('not found') || errMsg.includes('access'))) {
-        console.warn(`OpenAI model ${primaryModel} not active on key, falling back to gpt-4o-mini`);
-        res = await sendRequest('gpt-4o-mini');
+      if (errMsg.includes('max_completion_tokens')) {
+        res = await sendRequest(primaryModel, true);
       }
+    }
+
+    // Resilience fallback if selected preview model is busy (503), rate limited (429), or not permitted (404/400)
+    if (!res.ok && (res.status === 404 || res.status === 400 || res.status === 503 || res.status === 429)) {
+      res = await sendRequest('gpt-4o-mini', false);
     }
 
     if (!res.ok) {
@@ -255,14 +271,14 @@ class AIService {
   }
 
   // --- Anthropic Claude Client ---
-  async _callAnthropic({ creds, systemPrompt, userPrompt }) {
+  async _callAnthropic({ creds, systemPrompt, userPrompt, maxTokens = null }) {
     const endpoint = 'https://api.anthropic.com/v1/messages';
     const primaryModel = this._normalizeModel('anthropic', creds.model || 'claude-sonnet-5');
 
     const sendRequest = async (modelToUse) => {
       const payload = {
         model: modelToUse,
-        max_tokens: 2500,
+        max_tokens: typeof maxTokens === 'number' ? maxTokens : 1000,
         system: systemPrompt,
         messages: [{ role: 'user', content: userPrompt }],
         temperature: creds.temperature,
@@ -282,17 +298,11 @@ class AIService {
 
     let res = await sendRequest(primaryModel);
 
-    // Automatic resilience: If the configured preview model is not yet active on this key,
-    // fallback gracefully to current active flagship tier so research continues seamlessly.
-    if (!res.ok && res.status === 404) {
-      const errData = await res.json().catch(() => ({}));
-      const errMsg = (errData.error?.message || '').toLowerCase();
-      if (errMsg.includes('not_found') || errMsg.includes('model')) {
-        console.warn(`Anthropic model ${primaryModel} not found on this API tier, falling back to claude-3-7-sonnet-20250219`);
-        res = await sendRequest('claude-3-7-sonnet-20250219');
-        if (!res.ok && res.status === 404) {
-          res = await sendRequest('claude-3-5-sonnet-20241022');
-        }
+    // Automatic resilience: If the configured preview model is not found, rate limited, or experiencing high demand (503/429/404)
+    if (!res.ok && (res.status === 404 || res.status === 503 || res.status === 429)) {
+      res = await sendRequest('claude-3-7-sonnet-20250219');
+      if (!res.ok && (res.status === 404 || res.status === 503 || res.status === 429)) {
+        res = await sendRequest('claude-3-5-sonnet-20241022');
       }
     }
 
@@ -306,7 +316,7 @@ class AIService {
   }
 
   // --- Google Gemini Client ---
-  async _callGemini({ creds, systemPrompt, userPrompt, jsonMode, enableWebSearch = false }) {
+  async _callGemini({ creds, systemPrompt, userPrompt, jsonMode, enableWebSearch = false, maxTokens = null }) {
     const primaryModel = this._normalizeModel('gemini', creds.model || 'gemini-3.8-flash');
 
     const sendRequest = async (modelToUse) => {
@@ -322,6 +332,10 @@ class AIService {
           temperature: creds.temperature,
         },
       };
+
+      if (typeof maxTokens === 'number') {
+        payload.generationConfig.maxOutputTokens = maxTokens;
+      }
 
       if (jsonMode) {
         payload.generationConfig.responseMimeType = 'application/json';
@@ -340,11 +354,10 @@ class AIService {
 
     let res = await sendRequest(primaryModel);
 
-    // Fallback if model not found
-    if (!res.ok && res.status === 404) {
-      console.warn(`Gemini model ${primaryModel} not found, falling back to gemini-2.0-flash`);
+    // Automatic failover for 503 (High Demand / Spikes), 429 (Rate Limits), or 404 (Model Not Found)
+    if (!res.ok && (res.status === 503 || res.status === 429 || res.status === 404)) {
       res = await sendRequest('gemini-2.0-flash');
-      if (!res.ok && res.status === 404) {
+      if (!res.ok && (res.status === 503 || res.status === 429 || res.status === 404)) {
         res = await sendRequest('gemini-1.5-flash');
       }
     }
@@ -380,7 +393,7 @@ class AIService {
   }
 
   // --- OpenRouter Client ---
-  async _callOpenRouter({ creds, systemPrompt, userPrompt, jsonMode }) {
+  async _callOpenRouter({ creds, systemPrompt, userPrompt, jsonMode, maxTokens = null }) {
     const endpoint = 'https://openrouter.ai/api/v1/chat/completions';
     const model = this._normalizeModel('openrouter', creds.model || 'anthropic/claude-sonnet-5');
     const payload = {
@@ -391,6 +404,9 @@ class AIService {
       ],
       temperature: creds.temperature,
     };
+    if (typeof maxTokens === 'number') {
+      payload.max_tokens = maxTokens;
+    }
     if (jsonMode) {
       payload.response_format = { type: 'json_object' };
     }
@@ -416,7 +432,7 @@ class AIService {
   }
 
   // --- Custom Endpoint ---
-  async _callCustom({ creds, systemPrompt, userPrompt, jsonMode }) {
+  async _callCustom({ creds, systemPrompt, userPrompt, jsonMode, maxTokens = null }) {
     const endpoint = creds.customEndpoint || 'http://localhost:11434/v1/chat/completions';
     const model = this._normalizeModel('custom', creds.model || 'default');
     const payload = {
@@ -427,6 +443,9 @@ class AIService {
       ],
       temperature: creds.temperature,
     };
+    if (typeof maxTokens === 'number') {
+      payload.max_tokens = maxTokens;
+    }
 
     const headers = { 'Content-Type': 'application/json' };
     if (creds.apiKey) {
@@ -487,105 +506,84 @@ class AIService {
   }
 
   /**
+   * High-Signal Text Pre-Filter:
+   * Strips web boilerplate, cookie banners, navigation links, and repetitive footers.
+   * Caps text at 8,000 characters for Fast mode, and 14,000 characters for Deep mode.
+   */
+  _filterHighSignalContent(rawText, mode = 'fast') {
+    if (!rawText || typeof rawText !== 'string') return '';
+    let text = rawText;
+
+    // 1. Strip external ads and sponsored blocks
+    if (typeof FinancialExtractors !== 'undefined' && FinancialExtractors.stripAdText) {
+      text = FinancialExtractors.stripAdText(text);
+    } else {
+      text = text.replace(/^\s*(?:advertisement|sponsored content|promoted stories|ad choices)[\s:–-]*$/gim, '');
+    }
+
+    // 2. Strip repetitive boilerplate phrases (cookie policies, terms of service, social sharing footers)
+    text = text
+      .replace(/We use cookies to enhance your experience[^\n.]*(?:\.|\n|$)/gi, '')
+      .replace(/Sign up for our newsletter[^\n.]*(?:\.|\n|$)/gi, '')
+      .replace(/(?:Share this article|Follow us on Twitter|Follow us on LinkedIn|All rights reserved|©\s*\d{4}[^\n.]*)(?:\.|\n|$)/gi, '')
+      .replace(/\n{3,}/g, '\n\n')
+      .trim();
+
+    // 3. Mode-specific budget: 8,000 characters for Fast mode, 14,000 for Deep mode
+    const charLimit = mode === 'deep' ? 14000 : 8000;
+    return text.slice(0, charLimit);
+  }
+
+  /**
    * 1. Generate Filing Summary & Dynamic Contextual Assessment Meter
    */
   async generateSummary({ ticker, company, formType, text, headlines = [] }) {
+    const creds = await this.getCredentials();
+    const mode = creds.analysisMode || 'fast';
+    const isDeep = mode === 'deep';
+
     const mainHeadline = (headlines && headlines.length > 0 && headlines[0]) ? headlines[0] : (company || 'Document');
-    const cleanDocText = typeof FinancialExtractors !== 'undefined' && FinancialExtractors.stripAdText
-      ? FinancialExtractors.stripAdText(text || '')
-      : (text || '').replace(/^\s*(?:advertisement|sponsored content|promoted stories|ad choices)[\s:–-]*$/gim, '');
+    const filteredText = this._filterHighSignalContent(text, mode);
 
-    const prompt = `You are an elite financial research analyst. Analyze the following extracted document / article content:
-Topic / Headline: ${mainHeadline}
-Document Type: ${formType || 'Financial Report / Market Analysis'}
-Subject: ${company} (${ticker || 'N/A'})
+    const bulletCount = isDeep ? '5 to 7' : '3 to 4';
+    const changeCount = isDeep ? '3 to 5' : '2 to 3';
+    const queryCount = isDeep ? '3 to 4' : '2';
+    const termCount = isDeep ? '4 to 6' : '3 to 4';
 
-CRITICAL FILTERING & PRESENTATION:
-- EXCLUDE ALL ADS & SPONSORED PROMOTIONS: Ignore and discard any advertisements, marketing messages, subscription prompts, or sponsor disclaimers in the text. Never mention ads in your analysis.
-- UNIFIED DOCUMENT ANALYSIS: Treat all provided text directly as the primary document itself. Do not mention iframes, embedded viewers, or HTML containers in your summary.
+    const prompt = `Analyze this financial document/article as an elite equity research analyst.
+Subject: ${company} (${ticker || 'N/A'}) | Type: ${formType || 'Financial Report'} | Headline: ${mainHeadline}
 
-Extracted High-Signal Document / Article Text:
+Document Content:
 """
-${cleanDocText.slice(0, 16000)}
+${filteredText}
 """
+${headlines && headlines.length > 0 ? `Headlines:\n${headlines.slice(0, 5).map((h, i) => `${i + 1}. ${h}`).join('\n')}\n` : ''}
+RULES:
+1. "overview": 1-2 dense sentences summarizing the core development/thesis of THIS page. Bold **company names** and **key numbers**. Do not describe the website.
+2. "meter": Contextual meter ({ title, score: 0-100, label: "2-4 words", leftLabel, centerLabel, rightLabel, explanation: "1-2 sentences with facts/numbers" }).
+3. "bullets": ${bulletCount} dense takeaways. Begin EACH with a bold category headline (e.g. **Revenue & Margins:**, **Operational Drivers:**). Bold **key numbers**.
+4. "whatChanged": ${changeCount} period-over-period/YoY shifts ({ category, headline, changePercent, isPositive: bool, periodComparison, type: "financial"|"risk"|"operational" }).
+5. "toneTag": Short tag (e.g. "Tone: measured expansion").
+6. "suggestedQueries": ${queryCount} actionable research questions.
+7. "recommendedTerms": ${termCount} document-specific financial/industry terms.
+8. "discussedStocks": Public stocks analyzed in this summary ([{ "ticker": "SYMBOL", "company": "Name" }]).
+9. "disclaimer": Objective 1-sentence analytical disclaimer.
 
-Recent Headlines / Context:
-${(headlines || []).slice(0, 8).map((h, i) => `${i + 1}. ${h}`).join('\n')}
-
-ANALYTICAL REQUIREMENTS:
-1. What This Page Is About (Executive Overview):
-   - Your "overview" MUST summarize the PRIMARY REAL-WORLD SUBJECT MATTER, TOPIC, and CORE STORY/DEVELOPMENT of THIS SPECIFIC PAGE/ARTICLE itself (e.g. who/what it is about, what specific quarterly performance, EV deliveries, tariffs, earnings results, margin shifts, or product announcements took place).
-   - NEVER describe the website or news platform (e.g. NEVER say "This page provides Yahoo Finance news" or "This page is an article on Bloomberg"). Focus strictly on the actual company, industry event, financial results, or thesis discussed in the content.
-   - Write 1–2 dense, high-signal sentences with **bold entity/company names** and **bold key figures/metrics**.
-2. Dynamic Contextual Assessment Meter:
-   - Configure a document-specific assessment meter tailored specifically to the contents and nature of this page.
-   - title: Choose a relevant metric name that best measures the core insight of this document (e.g. "Disclosure Sentiment & Risk Balance", "Capital Allocation & Capex Stance", "Operating Growth vs Supply Vulnerability", "Credit & Liquidity Stance", "Macro Regulatory Vulnerability").
-   - score: 0 to 100 on the meter.
-   - label: 2–4 word descriptive label of the current status (e.g. "Steady Growth, Mixed Risks", "Defensive Headwinds Disclosed", "Strong Operational Expansion", "High Single-Source Dependency").
-   - leftLabel: Short 1–2 word descriptor of the left pole (e.g. "Defensive", "High Risk", "Contraction", "Vulnerable").
-   - centerLabel: Short 1–2 word descriptor of the center pole (e.g. "Neutral", "Balanced", "In-Line", "Moderate").
-   - rightLabel: Short 1–2 word descriptor of the right pole (e.g. "Expansionary", "Low Risk", "Accelerating", "Resilient").
-   - explanation: Write 1–2 dense, high-signal sentences explaining exactly what specific facts, dollar figures, percentage metrics, or stated risk mitigations from this document justify this score.
-3. Key Analytical Highlights:
-   - Provide a comprehensive, detailed breakdown of the page content.
-   - Begin EACH bullet point with a concise, bold category headline (e.g. **Revenue & Margins:**, **Operational Highlights:**, **Risk Factors:**, **Capital Allocation:**).
-   - Use bold markdown (**like this**) around all critical numbers and figures.
-4. What Changed YoY / Period Shifts:
-   - Extract 3 to 6 key period-over-period or YoY shifts (Revenue, Net Income, Margins, Cash Flow, Segment Shifts, Risk Factors).
-   - Format each change with category (e.g. "REVENUE", "SERVICES REVENUE", "NET INCOME", "OPERATING CASH FLOW", "RISK DISCLOSURES"), concise headline (e.g. "Revenue increased 2% YoY to $391.0B"), change percent tag (e.g. "+2%", "+14%", "-2%", "NEW"), boolean isPositive, period comparison (e.g. "FY2023: $383.3B → FY2024: $391.0B"), and type ("financial" | "risk" | "operational").
-5. Tone Pill Tag: Short tag (e.g. "Tone: measured overview").
-6. Suggested Deep-Dive Research Queries: 3 to 5 actionable questions.
-7. Analytical Disclaimer: 1-sentence objective note.
-8. AI Recommended Terms to Search & Explain:
-   - Extract 4 to 8 high-signal, document-specific financial, operational, or strategic terms/concepts that appear in or are central to THIS SPECIFIC page/filing/article (e.g. specific metrics, disclosed risks, accounting items, or industry-specific terms).
-9. Disclosed / Discussed Stocks in This Summary:
-   - Identify ALL real public company stocks specifically discussed, analyzed, or reported on in THIS SUMMARY.
-   - For EACH stock, provide its clean ticker symbol (e.g. "AAPL", "NVDA", "NWMC", "TSLA") and company name (e.g. "Apple Inc.", "NVIDIA Corporation", "Northwind Materials Co.").
-   - Do NOT include generic indices (e.g. S&P 500), media platforms (e.g. "Yahoo Finance", "Bloomberg"), or companies not specifically discussed in the summary.
-   - If no specific public stocks are discussed in the summary, return an empty array [].
-
-Return STRICTLY valid JSON with no markdown formatting:
+Return strictly valid JSON:
 {
-  "overview": "<1-2 clear sentences>",
-  "meter": {
-    "title": "<metric name>",
-    "score": <number 0-100>,
-    "label": "<status label>",
-    "leftLabel": "<left pole>",
-    "centerLabel": "<center pole>",
-    "rightLabel": "<right pole>",
-    "explanation": "<1-2 sentences>"
-  },
-  "whatChanged": [
-    {
-      "category": "REVENUE",
-      "headline": "Revenue increased 2% YoY to $391.0B",
-      "changePercent": "+2%",
-      "isPositive": true,
-      "periodComparison": "FY2023: $383.3B → FY2024: $391.0B",
-      "type": "financial"
-    }
-  ],
-  "toneTag": "<string>",
-  "bullets": [
-    "**Category:** Takeaway with **key numbers** bolded."
-  ],
-  "suggestedQueries": [
-    "<question 1>"
-  ],
-  "recommendedTerms": [
-    "<term 1>",
-    "<term 2>",
-    "<term 3>",
-    "<term 4>"
-  ],
-  "discussedStocks": [
-    { "ticker": "<TICKER>", "company": "<Company Name>" }
-  ],
+  "overview": "<1-2 sentences>",
+  "meter": { "title": "<name>", "score": <0-100>, "label": "<status>", "leftLabel": "<pole>", "centerLabel": "<pole>", "rightLabel": "<pole>", "explanation": "<rationale>" },
+  "whatChanged": [ { "category": "<CAT>", "headline": "<headline>", "changePercent": "<pct>", "isPositive": true, "periodComparison": "<comparison>", "type": "financial" } ],
+  "toneTag": "<tag>",
+  "bullets": [ "**Category:** Detail with **numbers**." ],
+  "suggestedQueries": [ "<query>" ],
+  "recommendedTerms": [ "<term>" ],
+  "discussedStocks": [ { "ticker": "<SYM>", "company": "<Name>" } ],
   "disclaimer": "<disclaimer>"
 }`;
 
-    const raw = await this.callLLM({ userPrompt: prompt, jsonMode: true });
+    const maxTokens = isDeep ? 1400 : 750;
+    const raw = await this.callLLM({ userPrompt: prompt, jsonMode: true, maxTokens });
     const parsed = this.safeParseJSON(raw);
 
     if (parsed) {
@@ -1176,7 +1174,7 @@ MANDATORY RULES:
           }
         }
       } catch (e) {
-        console.warn('Brave search error:', e);
+        // Fall back to subsequent search providers
       }
     }
 
@@ -1207,7 +1205,7 @@ MANDATORY RULES:
           }
         }
       } catch (e) {
-        console.warn('Tavily search error:', e);
+        // Fall back to subsequent search providers
       }
     }
 
@@ -1259,7 +1257,7 @@ MANDATORY RULES:
         }
       }
     } catch (ddgErr) {
-      console.warn('DuckDuckGo HTML search note:', ddgErr);
+      // Fall through to SEC EDGAR search
     }
 
     // 4. SEC EDGAR Live Filing Search (for financial tickers & company disclosures)
@@ -1457,7 +1455,7 @@ COMPLIANCE: Strictly descriptive summary of what sources state. Never give inves
       try {
         webSources = await this.searchWebSources({ query: searchQuery, count: 5 });
       } catch (err) {
-        console.warn('Web search failed, proceeding with document context only:', err);
+        // Proceed with document context if web search fails
       }
     }
 

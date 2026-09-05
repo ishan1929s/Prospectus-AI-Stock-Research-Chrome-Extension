@@ -73,6 +73,7 @@
         "services/license-service.js",
         "services/ai-service.js",
         "services/pdf-extractor.js",
+        "services/us-stocks.js",
         "services/watchlist-service.js",
         "content/extractors.js",
         "content/diff-engine.js",
