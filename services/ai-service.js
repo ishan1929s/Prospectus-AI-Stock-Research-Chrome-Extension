@@ -22,49 +22,122 @@ class AIService {
       return provider === 'anthropic' ? 'claude-sonnet-5' : (provider === 'openai' ? 'gpt-5.4-mini' : 'gemini-3.8-flash');
     }
 
-    // 1. Strip any '(Recommended)', '(Latest)', '(via OpenRouter)', or trailing descriptors
+    // 1. Strip any '(Recommended)', '(Latest)', '(Fast)', '(via OpenRouter)', or trailing descriptors
     let model = rawModel
       .replace(/\s*\([^)]*recommended[^)]*\)/gi, '')
       .replace(/\s*\([^)]*via openrouter[^)]*\)/gi, '')
       .replace(/\s*\([^)]*local[^)]*\)/gi, '')
+      .replace(/\s*\([^)]*fast[^)]*\)/gi, '')
       .trim();
+
+    if (provider === 'gemini') {
+      model = model.replace(/^models\//i, '').trim();
+    }
 
     // 2. Map human-readable model titles to official backend API model IDs
     const MODEL_ID_MAP = {
+      // Anthropic
       'claude sonnet 5': 'claude-sonnet-5',
+      'claude-sonnet-5': 'claude-sonnet-5',
       'claude fable 5': 'claude-fable-5',
+      'claude-fable-5': 'claude-fable-5',
       'claude opus 5': 'claude-opus-5',
+      'claude-opus-5': 'claude-opus-5',
       'claude haiku 4.5': 'claude-haiku-4-5',
+      'claude-haiku-4-5': 'claude-haiku-4-5',
+      'claude haiku 4.5 (fast)': 'claude-haiku-4-5',
+      'claude haiku 4.5 fast': 'claude-haiku-4-5',
       'claude opus 4.8': 'claude-opus-4-8',
+      'claude-opus-4-8': 'claude-opus-4-8',
       'claude opus 4.7': 'claude-opus-4-7',
+      'claude-opus-4-7': 'claude-opus-4-7',
       'claude opus 4.6': 'claude-opus-4-6',
+      'claude-opus-4-6': 'claude-opus-4-6',
       'claude opus 4.5': 'claude-opus-4-5-20251101',
+      'claude-opus-4-5-20251101': 'claude-opus-4-5-20251101',
       'claude sonnet 4.6': 'claude-sonnet-4-6',
+      'claude-sonnet-4-6': 'claude-sonnet-4-6',
       'claude sonnet 4.5': 'claude-sonnet-4-5-20250929',
+      'claude-sonnet-4-5-20250929': 'claude-sonnet-4-5-20250929',
+      'claude 3.7 sonnet': 'claude-3-7-sonnet-latest',
+      'claude-3-7-sonnet-latest': 'claude-3-7-sonnet-latest',
+      'claude 3.5 sonnet': 'claude-3-5-sonnet-latest',
+      'claude-3-5-sonnet-latest': 'claude-3-5-sonnet-latest',
+      'claude 3.5 haiku': 'claude-3-5-haiku-latest',
+      'claude-3-5-haiku-latest': 'claude-3-5-haiku-latest',
+
+      // OpenAI
       'gpt-5.6 sol': 'gpt-5.6-sol',
+      'gpt-5.6-sol': 'gpt-5.6-sol',
       'gpt-5.6 terra': 'gpt-5.6-terra',
+      'gpt-5.6-terra': 'gpt-5.6-terra',
       'gpt-5.6 luna': 'gpt-5.6-luna',
+      'gpt-5.6-luna': 'gpt-5.6-luna',
       'gpt-5.6 cyber': 'gpt-5.6-cyber',
+      'gpt-5.6-cyber': 'gpt-5.6-cyber',
+      'gpt-5.6': 'gpt-5.6',
       'gpt-5.5 pro': 'gpt-5.5-pro',
+      'gpt-5.5-pro': 'gpt-5.5-pro',
+      'gpt-5.5': 'gpt-5.5',
       'gpt-5.4 pro': 'gpt-5.4-pro',
+      'gpt-5.4-pro': 'gpt-5.4-pro',
       'gpt-5.4 mini': 'gpt-5.4-mini',
+      'gpt-5.4-mini': 'gpt-5.4-mini',
       'gpt-5.4 nano': 'gpt-5.4-nano',
+      'gpt-5.4-nano': 'gpt-5.4-nano',
+      'gpt-5.4': 'gpt-5.4',
       'gpt-5.3 codex': 'gpt-5.3-codex',
+      'gpt-5.3-codex': 'gpt-5.3-codex',
       'gpt-5.2 pro': 'gpt-5.2-pro',
+      'gpt-5.2-pro': 'gpt-5.2-pro',
+      'gpt-5.2': 'gpt-5.2',
       'gpt-5.1 chat latest': 'gpt-5.1-chat-latest',
+      'gpt-5.1-chat-latest': 'gpt-5.1-chat-latest',
+      'gpt-5.1': 'gpt-5.1',
       'gpt-5 mini': 'gpt-5-mini',
+      'gpt-5-mini': 'gpt-5-mini',
       'gpt-5 nano': 'gpt-5-nano',
+      'gpt-5-nano': 'gpt-5-nano',
       'gpt-5 pro': 'gpt-5-pro',
+      'gpt-5-pro': 'gpt-5-pro',
+      'gpt-5': 'gpt-5',
       'gpt-4.1 mini': 'gpt-4.1-mini',
+      'gpt-4.1-mini': 'gpt-4.1-mini',
       'gpt-4.1 nano': 'gpt-4.1-nano',
+      'gpt-4.1-nano': 'gpt-4.1-nano',
+      'gpt-4.1': 'gpt-4.1',
+      'gpt-4o': 'gpt-4o',
+      'gpt-4o-mini': 'gpt-4o-mini',
+      'o3-mini': 'o3-mini',
+      'o1': 'o1',
+
+      // Google Gemini
       'gemini 3.8 flash': 'gemini-3.8-flash',
+      'gemini-3.8-flash': 'gemini-3.8-flash',
       'gemini 3.7 flash': 'gemini-3.7-flash',
+      'gemini-3.7-flash': 'gemini-3.7-flash',
       'gemini 3.6 flash': 'gemini-3.6-flash',
+      'gemini-3.6-flash': 'gemini-3.6-flash',
       'gemini 3.5 flash': 'gemini-3.5-flash',
+      'gemini-3.5-flash': 'gemini-3.5-flash',
       'gemini 3.5 flash lite': 'gemini-3.5-flash-lite',
+      'gemini-3.5-flash-lite': 'gemini-3.5-flash-lite',
       'gemini 3.1 flash lite': 'gemini-3.1-flash-lite',
+      'gemini-3.1-flash-lite': 'gemini-3.1-flash-lite',
       'gemini 3.1 pro preview': 'gemini-3.1-pro-preview',
+      'gemini-3.1-pro-preview': 'gemini-3.1-pro-preview',
       'gemini 3 flash preview': 'gemini-3-flash-preview',
+      'gemini-3-flash-preview': 'gemini-3-flash-preview',
+      'gemini 2.5 flash': 'gemini-2.5-flash',
+      'gemini-2.5-flash': 'gemini-2.5-flash',
+      'gemini 2.5 pro': 'gemini-2.5-pro',
+      'gemini-2.5-pro': 'gemini-2.5-pro',
+      'gemini 2.0 flash': 'gemini-2.0-flash',
+      'gemini-2.0-flash': 'gemini-2.0-flash',
+      'gemini 1.5 flash': 'gemini-1.5-flash',
+      'gemini-1.5-flash': 'gemini-1.5-flash',
+      'gemini 1.5 pro': 'gemini-1.5-pro',
+      'gemini-1.5-pro': 'gemini-1.5-pro',
     };
 
     const lower = model.toLowerCase();
@@ -73,9 +146,20 @@ class AIService {
     if (provider === 'openrouter') {
       const openRouterMap = {
         'claude sonnet 5': 'anthropic/claude-sonnet-5',
+        'claude-sonnet-5': 'anthropic/claude-sonnet-5',
+        'claude haiku 4.5': 'anthropic/claude-haiku-4-5',
+        'claude-haiku-4-5': 'anthropic/claude-haiku-4-5',
+        'claude 3.5 sonnet': 'anthropic/claude-3.5-sonnet',
+        'claude-3.5-sonnet': 'anthropic/claude-3.5-sonnet',
         'gpt-5.6': 'openai/gpt-5.6',
         'gemini 3.8 flash': 'google/gemini-3.8-flash',
+        'gemini-3.8-flash': 'google/gemini-3.8-flash',
+        'gemini 2.5 flash': 'google/gemini-2.5-flash',
+        'gemini-2.5-flash': 'google/gemini-2.5-flash',
+        'gemini 1.5 flash': 'google/gemini-1.5-flash',
+        'gemini-1.5-flash': 'google/gemini-1.5-flash',
         'deepseek r1': 'deepseek/deepseek-r1',
+        'deepseek-r1': 'deepseek/deepseek-r1',
         'llama 3.3 70b instruct': 'meta-llama/llama-3.3-70b-instruct',
       };
       if (openRouterMap[lower]) return openRouterMap[lower];
@@ -256,14 +340,15 @@ class AIService {
       }
     }
 
-    // Resilience fallback if selected preview model is busy (503), rate limited (429), or not permitted (404/400)
-    if (!res.ok && (res.status === 404 || res.status === 400 || res.status === 503 || res.status === 429)) {
-      res = await sendRequest('gpt-4o-mini', false);
+    // If rate-limited (429) or temporary server error (503), retry the SAME requested model once after a brief delay
+    if (!res.ok && (res.status === 503 || res.status === 429)) {
+      await new Promise((r) => setTimeout(r, 600));
+      res = await sendRequest(primaryModel, false);
     }
 
     if (!res.ok) {
       const err = await res.json().catch(() => ({}));
-      throw new Error(`OpenAI API error (${res.status}): ${err.error?.message || res.statusText}`);
+      throw new Error(`OpenAI API error for model "${primaryModel}" (${res.status}): ${err.error?.message || res.statusText}`);
     }
 
     const data = await res.json();
@@ -298,17 +383,15 @@ class AIService {
 
     let res = await sendRequest(primaryModel);
 
-    // Automatic resilience: If the configured preview model is not found, rate limited, or experiencing high demand (503/429/404)
-    if (!res.ok && (res.status === 404 || res.status === 503 || res.status === 429)) {
-      res = await sendRequest('claude-3-7-sonnet-20250219');
-      if (!res.ok && (res.status === 404 || res.status === 503 || res.status === 429)) {
-        res = await sendRequest('claude-3-5-sonnet-20241022');
-      }
+    // If rate-limited (429) or temporary server error (503/529), retry the SAME requested model once after a brief delay
+    if (!res.ok && (res.status === 503 || res.status === 429 || res.status === 529)) {
+      await new Promise((r) => setTimeout(r, 600));
+      res = await sendRequest(primaryModel);
     }
 
     if (!res.ok) {
       const err = await res.json().catch(() => ({}));
-      throw new Error(`Anthropic API error (${res.status}): ${err.error?.message || res.statusText}`);
+      throw new Error(`Anthropic API error for model "${primaryModel}" (${res.status}): ${err.error?.message || res.statusText}`);
     }
 
     const data = await res.json();
@@ -320,7 +403,8 @@ class AIService {
     const primaryModel = this._normalizeModel('gemini', creds.model || 'gemini-3.8-flash');
 
     const sendRequest = async (modelToUse) => {
-      const endpoint = `https://generativelanguage.googleapis.com/v1beta/models/${modelToUse}:generateContent?key=${creds.apiKey}`;
+      const cleanModel = (modelToUse || '').replace(/^models\//i, '').trim();
+      const endpoint = `https://generativelanguage.googleapis.com/v1beta/models/${cleanModel}:generateContent?key=${creds.apiKey}`;
       const payload = {
         contents: [
           {
@@ -354,17 +438,15 @@ class AIService {
 
     let res = await sendRequest(primaryModel);
 
-    // Automatic failover for 503 (High Demand / Spikes), 429 (Rate Limits), or 404 (Model Not Found)
-    if (!res.ok && (res.status === 503 || res.status === 429 || res.status === 404)) {
-      res = await sendRequest('gemini-2.0-flash');
-      if (!res.ok && (res.status === 503 || res.status === 429 || res.status === 404)) {
-        res = await sendRequest('gemini-1.5-flash');
-      }
+    // If rate-limited (429) or temporary service unavailable (503), retry the SAME requested model once after a short delay
+    if (!res.ok && (res.status === 503 || res.status === 429)) {
+      await new Promise((r) => setTimeout(r, 600));
+      res = await sendRequest(primaryModel);
     }
 
     if (!res.ok) {
       const err = await res.json().catch(() => ({}));
-      throw new Error(`Gemini API error (${res.status}): ${err.error?.message || res.statusText}`);
+      throw new Error(`Gemini API error for model "${primaryModel}" (${res.status}): ${err.error?.message || res.statusText}`);
     }
 
     const data = await res.json();

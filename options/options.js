@@ -57,13 +57,16 @@ document.addEventListener('DOMContentLoaded', async () => {
       { id: 'claude-sonnet-5', label: 'Claude Sonnet 5', isRecommended: true },
       { id: 'claude-fable-5', label: 'Claude Fable 5' },
       { id: 'claude-opus-5', label: 'Claude Opus 5' },
-      { id: 'claude-haiku-4-5', label: 'Claude Haiku 4.5' },
+      { id: 'claude-haiku-4-5', label: 'Claude Haiku 4.5 (Fast)' },
       { id: 'claude-opus-4-8', label: 'Claude Opus 4.8' },
       { id: 'claude-opus-4-7', label: 'Claude Opus 4.7' },
       { id: 'claude-opus-4-6', label: 'Claude Opus 4.6' },
       { id: 'claude-opus-4-5-20251101', label: 'Claude Opus 4.5 (20251101)' },
       { id: 'claude-sonnet-4-6', label: 'Claude Sonnet 4.6' },
       { id: 'claude-sonnet-4-5-20250929', label: 'Claude Sonnet 4.5 (20250929)' },
+      { id: 'claude-3-7-sonnet-latest', label: 'Claude 3.7 Sonnet' },
+      { id: 'claude-3-5-sonnet-latest', label: 'Claude 3.5 Sonnet' },
+      { id: 'claude-3-5-haiku-latest', label: 'Claude 3.5 Haiku' },
       { id: '__custom__', label: 'Custom / Enter model manually...' },
     ],
     openai: [
@@ -90,6 +93,10 @@ document.addEventListener('DOMContentLoaded', async () => {
       { id: 'gpt-4.1', label: 'GPT-4.1' },
       { id: 'gpt-4.1-mini', label: 'GPT-4.1 Mini' },
       { id: 'gpt-4.1-nano', label: 'GPT-4.1 Nano' },
+      { id: 'gpt-4o', label: 'GPT-4o' },
+      { id: 'gpt-4o-mini', label: 'GPT-4o Mini' },
+      { id: 'o3-mini', label: 'o3-mini' },
+      { id: 'o1', label: 'o1' },
       { id: '__custom__', label: 'Custom / Enter model manually...' },
     ],
     gemini: [
@@ -101,12 +108,21 @@ document.addEventListener('DOMContentLoaded', async () => {
       { id: 'gemini-3.1-flash-lite', label: 'Gemini 3.1 Flash Lite' },
       { id: 'gemini-3.1-pro-preview', label: 'Gemini 3.1 Pro Preview' },
       { id: 'gemini-3-flash-preview', label: 'Gemini 3 Flash Preview' },
+      { id: 'gemini-2.5-flash', label: 'Gemini 2.5 Flash' },
+      { id: 'gemini-2.5-pro', label: 'Gemini 2.5 Pro' },
+      { id: 'gemini-2.0-flash', label: 'Gemini 2.0 Flash' },
+      { id: 'gemini-1.5-flash', label: 'Gemini 1.5 Flash' },
+      { id: 'gemini-1.5-pro', label: 'Gemini 1.5 Pro' },
       { id: '__custom__', label: 'Custom / Enter model manually...' },
     ],
     openrouter: [
       { id: 'anthropic/claude-sonnet-5', label: 'Claude Sonnet 5 (via OpenRouter)', isRecommended: true },
+      { id: 'anthropic/claude-haiku-4-5', label: 'Claude Haiku 4.5 (Fast) (via OpenRouter)' },
       { id: 'openai/gpt-5.6', label: 'GPT-5.6 (via OpenRouter)' },
       { id: 'google/gemini-3.8-flash', label: 'Gemini 3.8 Flash (via OpenRouter)' },
+      { id: 'google/gemini-2.5-flash', label: 'Gemini 2.5 Flash (via OpenRouter)' },
+      { id: 'google/gemini-1.5-flash', label: 'Gemini 1.5 Flash (via OpenRouter)' },
+      { id: 'anthropic/claude-3.5-sonnet', label: 'Claude 3.5 Sonnet (via OpenRouter)' },
       { id: 'deepseek/deepseek-r1', label: 'DeepSeek R1' },
       { id: 'meta-llama/llama-3.3-70b-instruct', label: 'Llama 3.3 70B Instruct' },
       { id: '__custom__', label: 'Custom / Enter model manually...' },
@@ -163,11 +179,20 @@ document.addEventListener('DOMContentLoaded', async () => {
       modelSelect.appendChild(opt);
     });
 
-    const isKnown = list.some((m) => m.id === selectedModel && m.id !== '__custom__');
-    if (selectedModel && isKnown) {
-      modelSelect.value = selectedModel;
+    const norm = (str) => (str || '').toLowerCase().replace(/\s*\([^)]*\)/g, '').replace(/[\s\-_]/g, '').trim();
+    const matched = list.find((m) =>
+      m.id !== '__custom__' && (
+        m.id === selectedModel ||
+        m.id.toLowerCase() === (selectedModel || '').toLowerCase() ||
+        norm(m.id) === norm(selectedModel) ||
+        norm(m.label) === norm(selectedModel)
+      )
+    );
+
+    if (selectedModel && matched) {
+      modelSelect.value = matched.id;
       modelCustomInput.style.display = 'none';
-    } else if (selectedModel && selectedModel !== list[0].id) {
+    } else if (selectedModel && selectedModel !== list[0].id && selectedModel !== '__custom__') {
       modelSelect.value = '__custom__';
       modelCustomInput.value = selectedModel;
       modelCustomInput.style.display = 'block';

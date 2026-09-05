@@ -1530,11 +1530,19 @@
           const scopeKey = this.getSnapshotScopeKey();
           const defaultNew = this.pageData.riskFactorsText || (this.pageData.fullText ? this.pageData.fullText.slice(0, 8000) : '');
           const periodName = `Snapshot ${new Date().toLocaleDateString()} ${new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`;
+          const whatChangedItems = (res && Array.isArray(res.whatChanged) && res.whatChanged.length > 0)
+            ? res.whatChanged
+            : this.ai.extractDynamicWhatChanged({
+                text: defaultNew,
+                company: this.pageData.company,
+                ticker: this.pageData.ticker,
+                formType: this.pageData.formType,
+              });
           await this.storage.saveFilingSnapshot(
             scopeKey,
             this.pageData.formType || 'Document',
             periodName,
-            { text: defaultNew }
+            { text: defaultNew, whatChanged: whatChangedItems }
           );
         } catch (snapErr) {
           // Snapshot auto-save failure handled silently
@@ -1558,59 +1566,7 @@
 
     // --- Tab 2: What Changed (Structured Shift Cards & Version Tracking) ---
     async renderWhatChangedTab(container) {
-      // 1. If not analyzed yet and no analysis result, show unanalyzed state (matching Summary tab)
-      if (!this.summaryResult && !this.isAnalyzing) {
-        if (this.lastAnalysisError) {
-          container.innerHTML = `
-            <div class="non-finance-view">
-              <div class="analysis-error-card">
-                <div class="error-header">
-                  <span class="error-badge">API Call Error</span>
-                </div>
-                <p class="error-text">${this.lastAnalysisError}</p>
-                <div style="display: flex; gap: 8px; margin-top: 6px;">
-                  <button class="btn-dark-cta" id="btn-what-changed-analyze" style="padding: 7px 14px; font-size: 12.5px;">
-                    Retry Analysis
-                  </button>
-                  <button class="coral-btn" id="btn-error-settings-what" style="font-size: 11.5px; padding: 7px 12px;">
-                    Open Settings
-                  </button>
-                </div>
-              </div>
-              <div class="non-finance-notice">
-                Please verify your API key, provider configuration, or network connection in Prospectus Settings.
-              </div>
-            </div>
-          `;
-
-          const retryBtn = this.shadowRoot.getElementById('btn-what-changed-analyze');
-          if (retryBtn) retryBtn.addEventListener('click', () => this.runSummaryAnalysis());
-
-          const settingsBtn = this.shadowRoot.getElementById('btn-error-settings-what');
-          if (settingsBtn) settingsBtn.addEventListener('click', () => this.openSettings());
-          return;
-        }
-
-        container.innerHTML = `
-          <div class="non-finance-view">
-            <p class="non-finance-prompt">Ready to track YoY & period changes for ${this.pageData.company || 'this document'}?</p>
-            <button class="btn-dark-cta" id="btn-what-changed-analyze">
-              Analyze this page
-            </button>
-            <div class="non-finance-notice">
-              Prospectus automatically extracts top-line revenue shifts, segment growth, operating margins, cash flows, and new Item 1A risk disclosures.
-            </div>
-          </div>
-        `;
-
-        const analyzeBtn = this.shadowRoot.getElementById('btn-what-changed-analyze');
-        if (analyzeBtn) {
-          analyzeBtn.addEventListener('click', () => this.runSummaryAnalysis());
-        }
-        return;
-      }
-
-      // 2. If analyzing currently
+      // 1. If currently analyzing with LLM, show smooth loading shimmer cards
       if (this.isAnalyzing) {
         container.innerHTML = `
           <div class="what-changed-view">
@@ -1639,162 +1595,89 @@
         return;
       }
 
-      // 3. Check history for this scope
-      const scopeKey = this.getSnapshotScopeKey();
-      const history = await this.storage.getFilingHistory(scopeKey);
-      const currentText = this.pageData.fullText || this.pageData.riskFactorsText || '';
-      const currentPeriod = this.pageData.periodBadge || this.pageData.filingDate || new Date().toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+      // 2. Directly extract what changed items (immediately available even on the first visit)
+      const currentText = this.pageData ? (this.pageData.fullText || this.pageData.riskFactorsText || this.pageData.extractedText || '') : '';
+      const currentPeriod = this.pageData ? (this.pageData.periodBadge || this.pageData.filingDate || new Date().toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })) : new Date().toLocaleDateString();
 
-      // CASE A: No history is present -> Save baseline and do NOT show any change
+      let items = (this.summaryResult && Array.isArray(this.summaryResult.whatChanged) && this.summaryResult.whatChanged.length > 0)
+        ? this.summaryResult.whatChanged
+        : this.ai.extractDynamicWhatChanged({
+            text: currentText,
+            company: this.pageData ? this.pageData.company : 'Company',
+            ticker: this.pageData ? this.pageData.ticker : 'TICKER',
+            formType: this.pageData ? this.pageData.formType : 'Report',
+          });
+
+      // If summaryResult is not yet loaded and user is not analyzing, trigger analysis in background if API key exists
+      if (!this.summaryResult && !this.isAnalyzing) {
+        this.storage.getSettings().then((s) => {
+          if (s && s.apiKey) {
+            this.runSummaryAnalysis().catch(() => {});
+          }
+        }).catch(() => {});
+      }
+
+      // 3. Automatically record snapshot & baseline in background without blocking UI
+      const scopeKey = this.getSnapshotScopeKey();
+      let history = await this.storage.getFilingHistory(scopeKey);
+
       if (!history || history.length === 0) {
+        // Automatically create both baseline and initial revision snapshot in background
         const baselinePeriod = `Initial Baseline · ${currentPeriod}`;
-        await this.storage.saveFilingSnapshot(scopeKey, this.pageData.formType || 'Document', baselinePeriod, {
+        const currentRevPeriod = `Current · ${currentPeriod}`;
+
+        await this.storage.saveFilingSnapshot(scopeKey, this.pageData ? (this.pageData.formType || 'Document') : 'Document', baselinePeriod, {
+          text: currentText,
+          savedAt: new Date(Date.now() - 1000).toISOString(),
+          summary: this.summaryResult ? this.summaryResult.overview : '',
+          whatChanged: [],
+        });
+
+        await this.storage.saveFilingSnapshot(scopeKey, this.pageData ? (this.pageData.formType || 'Document') : 'Document', currentRevPeriod, {
           text: currentText,
           savedAt: new Date().toISOString(),
           summary: this.summaryResult ? this.summaryResult.overview : '',
-          whatChanged: [], // Baseline has no prior changes
+          whatChanged: items,
         });
 
-        container.innerHTML = `
-          <div class="what-changed-view">
-            <div class="what-changed-header">
-              <h2 class="what-changed-title">What changed</h2>
-              <span class="wc-baseline-status-badge">● Baseline Active</span>
-            </div>
-
-            <div class="wc-baseline-card">
-              <div class="wc-card-category">
-                <span class="wc-cat-dot">●</span>
-                <span>INITIAL BASELINE ESTABLISHED</span>
-              </div>
-              <h3 class="wc-baseline-headline">Baseline recorded for ${FilingDiffEngine.escapeHTML(this.pageData.company || this.pageData.ticker || 'this document')}</h3>
-              <p class="wc-baseline-desc">
-                No prior version history exists for this document, so no changes are displayed. This initial baseline has been saved to your local history. Future filings, revisions, or page updates will automatically be compared against this baseline to track material YoY and period changes.
-              </p>
-              <div class="wc-baseline-meta-row">
-                <span class="wc-baseline-meta">Recorded: <strong>${new Date().toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}</strong></span>
-                <span class="wc-baseline-meta">Scope: <strong>${FilingDiffEngine.escapeHTML(this.pageData.ticker || this.pageData.formType || 'Document')}</strong></span>
-                <span class="wc-baseline-meta">Status: <strong>Tracking Active</strong></span>
-              </div>
-              <div style="margin-top: 10px; display: flex; gap: 8px;">
-                <button class="coral-btn" id="btn-wc-new-snapshot" style="font-size: 11px; padding: 5px 10px;">
-                  + Record Revision Snapshot
-                </button>
-              </div>
-            </div>
-          </div>
-        `;
-
-        const newSnapBtn = this.shadowRoot.getElementById('btn-wc-new-snapshot');
-        if (newSnapBtn) {
-          newSnapBtn.addEventListener('click', async () => {
-            const revPeriod = `Revision · ${new Date().toLocaleDateString()} ${new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`;
-            const items = (this.summaryResult && Array.isArray(this.summaryResult.whatChanged) && this.summaryResult.whatChanged.length > 0)
-              ? this.summaryResult.whatChanged
-              : this.ai.extractDynamicWhatChanged({
-                  text: currentText,
-                  company: this.pageData.company,
-                  ticker: this.pageData.ticker,
-                  formType: this.pageData.formType
-                });
-            await this.storage.saveFilingSnapshot(scopeKey, this.pageData.formType || 'Document', revPeriod, {
-              text: currentText,
-              savedAt: new Date().toISOString(),
-              whatChanged: items,
-            });
-            this.showToast('Revision snapshot recorded to history.');
-            this.renderWhatChangedTab(container);
-          });
-        }
-        return;
-      }
-
-      // CASE B: History IS present -> Check if only baseline exists without changes
-      const latestRevision = history[0];
-      const baselineItem = history[history.length - 1];
-
-      if (history.length === 1 && (!latestRevision.whatChanged || latestRevision.whatChanged.length === 0)) {
-        container.innerHTML = `
-          <div class="what-changed-view">
-            <div class="what-changed-header">
-              <h2 class="what-changed-title">What changed</h2>
-              <span class="wc-baseline-status-badge">● Baseline Active</span>
-            </div>
-
-            <div class="wc-baseline-card">
-              <div class="wc-card-category">
-                <span class="wc-cat-dot">●</span>
-                <span>INITIAL BASELINE ESTABLISHED</span>
-              </div>
-              <h3 class="wc-baseline-headline">Baseline recorded for ${FilingDiffEngine.escapeHTML(this.pageData.company || this.pageData.ticker || 'this document')}</h3>
-              <p class="wc-baseline-desc">
-                Initial baseline snapshot is active (saved ${new Date(baselineItem.savedAt).toLocaleDateString()}). No subsequent revisions have been recorded yet. Click below to record a new revision snapshot to track changes.
-              </p>
-              <div class="wc-baseline-meta-row">
-                <span class="wc-baseline-meta">Baseline: <strong>${baselineItem.period || 'Initial'}</strong></span>
-                <span class="wc-baseline-meta">History: <strong>1 Snapshot</strong></span>
-              </div>
-              <div style="margin-top: 10px; display: flex; gap: 8px;">
-                <button class="coral-btn" id="btn-wc-new-snapshot" style="font-size: 11px; padding: 5px 10px;">
-                  + Record Revision Snapshot
-                </button>
-              </div>
-            </div>
-          </div>
-        `;
-
-        const newSnapBtn = this.shadowRoot.getElementById('btn-wc-new-snapshot');
-        if (newSnapBtn) {
-          newSnapBtn.addEventListener('click', async () => {
-            const revPeriod = `Revision · ${new Date().toLocaleDateString()} ${new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`;
-            const items = (this.summaryResult && Array.isArray(this.summaryResult.whatChanged) && this.summaryResult.whatChanged.length > 0)
-              ? this.summaryResult.whatChanged
-              : this.ai.extractDynamicWhatChanged({
-                  text: currentText,
-                  company: this.pageData.company,
-                  ticker: this.pageData.ticker,
-                  formType: this.pageData.formType
-                });
-            await this.storage.saveFilingSnapshot(scopeKey, this.pageData.formType || 'Document', revPeriod, {
-              text: currentText,
-              savedAt: new Date().toISOString(),
-              whatChanged: items,
-            });
-            this.showToast('Revision snapshot recorded to history.');
-            this.renderWhatChangedTab(container);
-          });
-        }
-        return;
-      }
-
-      // History has revisions! Load changes history and render cards
-      const latestData = await this.storage.get(latestRevision.key);
-      let items = (latestData && latestData[latestRevision.key] && Array.isArray(latestData[latestRevision.key].whatChanged) && latestData[latestRevision.key].whatChanged.length > 0)
-        ? latestData[latestRevision.key].whatChanged
-        : ((this.summaryResult && Array.isArray(this.summaryResult.whatChanged) && this.summaryResult.whatChanged.length > 0)
-            ? this.summaryResult.whatChanged
-            : this.ai.extractDynamicWhatChanged({
-                text: currentText,
-                company: this.pageData.company,
-                ticker: this.pageData.ticker,
-                formType: this.pageData.formType
-              }));
-
-      // Automatically persist whatChanged into snapshot history if not already stored
-      if (latestData && latestData[latestRevision.key] && (!latestData[latestRevision.key].whatChanged || latestData[latestRevision.key].whatChanged.length === 0)) {
-        await this.storage.set({
-          [latestRevision.key]: {
-            ...latestData[latestRevision.key],
+        history = await this.storage.getFilingHistory(scopeKey);
+      } else if (history.length === 1) {
+        const firstSnap = history[0];
+        const snapData = await this.storage.get(firstSnap.key);
+        if (!snapData || !snapData[firstSnap.key] || !Array.isArray(snapData[firstSnap.key].whatChanged) || snapData[firstSnap.key].whatChanged.length === 0) {
+          const currentRevPeriod = `Current · ${currentPeriod}`;
+          await this.storage.saveFilingSnapshot(scopeKey, this.pageData ? (this.pageData.formType || 'Document') : 'Document', currentRevPeriod, {
+            text: currentText,
+            savedAt: new Date().toISOString(),
+            summary: this.summaryResult ? this.summaryResult.overview : '',
             whatChanged: items,
-          }
-        });
+          });
+          history = await this.storage.getFilingHistory(scopeKey);
+        } else {
+          items = snapData[firstSnap.key].whatChanged;
+        }
+      } else {
+        const latestRevision = history[0];
+        const latestData = await this.storage.get(latestRevision.key);
+        if (latestData && latestData[latestRevision.key] && Array.isArray(latestData[latestRevision.key].whatChanged) && latestData[latestRevision.key].whatChanged.length > 0) {
+          items = latestData[latestRevision.key].whatChanged;
+        } else {
+          await this.storage.set({
+            [latestRevision.key]: {
+              ...(latestData ? latestData[latestRevision.key] : {}),
+              whatChanged: items,
+            },
+          });
+        }
       }
 
-      const historyOptionsHTML = history.map((h, i) => `
-        <option value="${h.key}" ${i === 0 ? 'selected' : ''}>
-          ${i === 0 ? 'Latest Revision' : 'Baseline'}: ${h.period || new Date(h.savedAt).toLocaleDateString()}
-        </option>
-      `).join('');
+      const historyOptionsHTML = (history && history.length > 0)
+        ? history.map((h, i) => `
+            <option value="${h.key}" ${i === 0 ? 'selected' : ''}>
+              ${i === 0 ? 'Latest Revision' : (i === history.length - 1 ? 'Initial Baseline' : `Revision ${history.length - i}`)}: ${h.period || new Date(h.savedAt).toLocaleDateString()}
+            </option>
+          `).join('')
+        : `<option value="auto" selected>Auto-recorded Baseline · ${currentPeriod}</option>`;
 
       const renderCards = (filterType = 'all') => {
         const filtered = items.filter(item => {
