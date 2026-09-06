@@ -3,14 +3,6 @@
  */
 
 document.addEventListener('DOMContentLoaded', async () => {
-  // Silence console.warn and console.error in options page
-  if (typeof console !== 'undefined') {
-    try {
-      console.warn = () => {};
-      console.error = () => {};
-    } catch (e) {}
-  }
-
   const storage = window.ProspectusStorage || new StorageService();
   const licenseService = window.ProspectusLicense || new LicenseService(storage);
   const aiService = window.ProspectusAI || new AIService(storage);

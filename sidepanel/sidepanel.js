@@ -22,6 +22,9 @@ document.addEventListener('DOMContentLoaded', async () => {
   let lastAnalysisError = null;
   let showToast = () => {};
   let showPersistentStatus = () => {};
+  // Incremented every time the active page is refreshed or navigated.
+  // Async callbacks capture this at start and bail out if it has changed.
+  let pageVersion = 0;
 
   const getStockCurrencySymbol = (stockOrQuote, ticker = '') => {
     if (stockOrQuote?.currencySymbol) return stockOrQuote.currencySymbol;
@@ -40,14 +43,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     return '$';
   };
 
-  // Silence all console.warn and console.error within Prospectus sidepanel context
-  // to guarantee Chrome never logs runtime error/warning badges in chrome://extensions
-  if (typeof console !== 'undefined') {
-    try {
-      console.warn = () => {};
-      console.error = () => {};
-    } catch (e) {}
-  }
+  // Clean error handling without muting browser console methods
 
   // Suppress harmless extension reload, API, and connection errors from throwing to Chrome
   if (typeof window !== 'undefined') {
@@ -100,21 +96,45 @@ document.addEventListener('DOMContentLoaded', async () => {
   }
 
   async function loadActivePageData() {
-    activeTab = await getActiveTab();
-    proceedAnyway = false;
-    summaryResult = null;
-
-    if (!activeTab) {
-      pageData = {
-        ticker: 'PAGE',
-        company: 'Web Document',
-        formType: 'Document',
-        headlines: ['Document'],
-        fullText: 'Document content ready for analysis.',
-        isFinanceSite: true,
-      };
+    const myVersion = pageVersion; // snapshot version at call time
+    const nextTab = await getActiveTab();
+    if (myVersion !== pageVersion) return; // page was refreshed while we were awaiting — abort
+    if (!nextTab) {
+      if (!pageData) {
+        pageData = {
+          ticker: 'PAGE',
+          company: 'Web Document',
+          formType: 'Document',
+          headlines: ['Document'],
+          fullText: 'Document content ready for analysis.',
+          isFinanceSite: true,
+        };
+      }
       return;
     }
+
+    const nextUrl = nextTab.url || '';
+
+    // If user switched to an internal extension page (e.g. Options/Settings or chrome://),
+    // do NOT wipe or reset our active research analysis state!
+    if (
+      nextUrl.startsWith('chrome-extension://') ||
+      nextUrl.startsWith('chrome://') ||
+      nextUrl.startsWith('edge://') ||
+      nextUrl.startsWith('about:') ||
+      nextUrl.includes('options/options.html')
+    ) {
+      return;
+    }
+
+    // If it's a different tab navigating to a different URL, preserve nothing.
+    // (Same-tab same-URL refreshes are handled by the onUpdated listener below.)
+
+    activeTab = nextTab;
+    proceedAnyway = false;
+
+    // No cache — always start fresh
+    summaryResult = null;
 
     const url = activeTab.url || '';
     const title = activeTab.title || 'PDF / Web Document';
@@ -157,7 +177,9 @@ document.addEventListener('DOMContentLoaded', async () => {
       try {
         const msgRes = await new Promise((resolve) => {
           chrome.tabs.sendMessage(activeTab.id, { action: 'GET_PAGE_DATA' }, (response) => {
-            if (chrome.runtime.lastError || !response || !response.pageData) {
+            // Always read lastError to suppress Chrome's "Unchecked runtime.lastError" warning
+            const err = chrome.runtime.lastError;
+            if (err || !response || !response.pageData) {
               return resolve(null);
             }
             resolve(response.pageData);
@@ -229,6 +251,24 @@ document.addEventListener('DOMContentLoaded', async () => {
         }
       }
     }
+
+    if (myVersion !== pageVersion) return; // page refreshed during page data collection — abort
+
+    // Auto-record baseline on 1st visit and snapshot updates in background
+    autoRecordSnapshotInBackground();
+  }
+
+  async function autoRecordSnapshotInBackground() {
+    try {
+      if (!pageData || pageData.isYouTube) return;
+      const scopeKey = storageService.getSnapshotScopeKey(pageData, activeFilingContext);
+      await storageService.autoRecordSnapshot({
+        scopeKey,
+        pageData,
+        summaryResult,
+        aiService: ai,
+      });
+    } catch (e) {}
   }
 
   async function renderBaseUI() {
@@ -716,6 +756,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     }
 
     if (!summaryResult && !isAnalyzing) {
+
       if (!pageData.isFinanceSite && !proceedAnyway) {
         container.innerHTML = `
           <div class="non-finance-view">
@@ -758,7 +799,24 @@ document.addEventListener('DOMContentLoaded', async () => {
         return;
       }
 
-      runSummaryAnalysis();
+      container.innerHTML = `
+        <div class="non-finance-view">
+          <p class="non-finance-prompt">Ready to analyze ${pageData.company || 'this document'}?</p>
+          <button class="btn-dark-cta" id="btn-sidepanel-analyze">
+            ${ICONS.sparkle} <span>Analyze Document</span>
+          </button>
+          <div class="non-finance-notice">
+            Click to run AI summary, extract key risk disclosures, and evaluate coverage tone. All processing runs on-demand with your configured API key.
+          </div>
+        </div>
+      `;
+
+      const manualBtn = document.getElementById('btn-sidepanel-analyze');
+      if (manualBtn) {
+        manualBtn.addEventListener('click', () => {
+          runSummaryAnalysis();
+        });
+      }
       return;
     }
 
@@ -1076,9 +1134,8 @@ document.addEventListener('DOMContentLoaded', async () => {
     const diffBtns = container.querySelectorAll('.btn-sp-view-full-diff');
     diffBtns.forEach((btn) => {
       btn.addEventListener('click', () => {
-        activeTabName = 'changed';
-        renderHeader();
-        renderTabContent();
+        activeTabName = 'what-changed';
+        renderActiveTab();
       });
     });
 
@@ -1244,6 +1301,9 @@ document.addEventListener('DOMContentLoaded', async () => {
         throw new Error('API returned an empty response. Please try again.');
       }
       lastAnalysisError = null;
+
+      // Auto-record snapshot and update baseline whatChanged in background
+      autoRecordSnapshotInBackground();
     } catch (e) {
       summaryResult = null;
       lastAnalysisError = `API call error: ${e.message || 'Unable to complete AI request. Please check Settings.'}`;
@@ -1255,51 +1315,17 @@ document.addEventListener('DOMContentLoaded', async () => {
   }
 
   async function renderWhatChangedTab(container) {
-    if (!summaryResult && !isAnalyzing) {
-      if (lastAnalysisError) {
-        container.innerHTML = `
-          <div class="non-finance-view">
-            <div class="non-financial-card">
-              <div class="non-financial-badge">
-                <span class="warning-badge-pill">⚠️ Analysis Notice</span>
-              </div>
-              <h3 class="non-financial-title">Unable to track changes</h3>
-              <p class="non-financial-text">
-                ${lastAnalysisError}. Verify your API key in Settings.
-              </p>
-              <div class="choice-buttons" style="margin-top: 10px; display: flex; gap: 8px;">
-                <button class="btn-dark-cta" id="btn-sp-wc-retry-analyze">
-                  ${ICONS.sparkle} <span>Try again</span>
-                </button>
-                <button class="coral-btn" id="btn-sp-wc-notice-settings" style="font-size: 11.5px; padding: 7px 12px;">
-                  Open Settings
-                </button>
-              </div>
-            </div>
-          </div>
-        `;
-        const retryBtn = document.getElementById('btn-sp-wc-retry-analyze');
-        if (retryBtn) retryBtn.addEventListener('click', () => runSummaryAnalysis());
-        const noticeSettingsBtn = document.getElementById('btn-sp-wc-notice-settings');
-        if (noticeSettingsBtn) noticeSettingsBtn.addEventListener('click', () => openSettings());
-        return;
-      }
+    if (pageData && pageData.isYouTube) {
       container.innerHTML = `
         <div class="non-finance-view">
-          <p class="non-finance-prompt">Ready to track YoY & period changes for ${pageData ? pageData.company : 'this document'}?</p>
-          <button class="btn-dark-cta" id="btn-sp-what-changed-analyze">
-            Analyze this page
-          </button>
-          <div class="non-finance-notice">
-            Prospectus extracts top-line revenue shifts, segment growth, operating margins, cash flows, and new Item 1A risk disclosures.
+          <div class="non-financial-card">
+            <h3 class="non-financial-title" style="margin-bottom: 8px;">Prospectus is inactive on YouTube</h3>
+            <p class="non-financial-text">
+              Prospectus is disabled on YouTube to prevent interference with video media playback. Please navigate to an SEC filing, earnings report, or financial news article.
+            </p>
           </div>
         </div>
       `;
-
-      const analyzeBtn = document.getElementById('btn-sp-what-changed-analyze');
-      if (analyzeBtn) {
-        analyzeBtn.addEventListener('click', () => runSummaryAnalysis());
-      }
       return;
     }
 
@@ -1326,183 +1352,34 @@ document.addEventListener('DOMContentLoaded', async () => {
       return;
     }
 
-    const scopeKey = activeFilingContext
-      ? `filing_${activeFilingContext.ticker}`
-      : ((pageData && pageData.ticker && pageData.ticker !== 'PAGE' && pageData.ticker !== 'PDF')
-        ? `sp_${pageData.ticker.toUpperCase().replace(/[^a-zA-Z0-9]/g, '_')}_${(pageData.formType || 'Doc').replace(/[^a-zA-Z0-9]/g, '_')}`
-        : `sp_${(pageData?.url || 'page').replace(/[^a-zA-Z0-9]/g, '_').slice(0, 60)}`);
+    // No cache — summaryResult lives in memory only
 
-    const history = await storageService.getFilingHistory(scopeKey);
-    const currentText = pageData ? (pageData.fullText || pageData.extractedText || pageData.company || '') : '';
+    const scopeKey = storageService.getSnapshotScopeKey(pageData, activeFilingContext);
+    const currentText = pageData ? (pageData.fullText || pageData.riskFactorsText || pageData.extractedText || pageData.bodyText || pageData.company || '') : '';
     const currentPeriod = pageData ? (pageData.periodBadge || pageData.filingDate || new Date().toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })) : new Date().toLocaleDateString();
 
+    // Automatically record baseline / snapshot in background
+    await storageService.autoRecordSnapshot({
+      scopeKey,
+      pageData,
+      summaryResult,
+      aiService: ai,
+    });
+
+    const history = await storageService.getFilingHistory(scopeKey);
     const escape = (str) => String(str || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
 
-    // CASE A: No history is present -> Save baseline and do NOT show any change
-    if (!history || history.length === 0) {
-      const baselinePeriod = `Initial Baseline · ${currentPeriod}`;
-      await storageService.saveFilingSnapshot(scopeKey, pageData?.formType || 'Document', baselinePeriod, {
-        text: currentText,
-        savedAt: new Date().toISOString(),
-        summary: summaryResult ? summaryResult.overview : '',
-        whatChanged: [],
-      });
-
-      container.innerHTML = `
-        <div class="what-changed-view">
-          ${
-            activeFilingContext
-              ? `
-              <div class="active-filing-banner">
-                <div class="filing-banner-left">
-                  <span class="filing-banner-tag">SEC ${activeFilingContext.formType}</span>
-                  <span class="filing-banner-title" title="${activeFilingContext.company} (${activeFilingContext.ticker})">${activeFilingContext.company} (${activeFilingContext.ticker}) · Shifts vs Prior Filing</span>
-                </div>
-                <div class="filing-banner-actions">
-                  <a href="${activeFilingContext.sourceUrl}" target="_blank" rel="noopener" class="filing-banner-source-link" title="Open official SEC EDGAR filing">View source ↗</a>
-                  <button type="button" class="filing-banner-back-btn" id="btn-sp-wc-return-page-doc" title="Return to current webpage document">✕ Close</button>
-                </div>
-              </div>
-            `
-              : ''
-          }
-          <div class="what-changed-header">
-            <h2 class="what-changed-title">What changed</h2>
-            <span class="wc-baseline-status-badge">● Baseline Active</span>
-          </div>
-
-          <div class="wc-baseline-card">
-            <div class="wc-card-category">
-              <span class="wc-cat-dot">●</span>
-              <span>INITIAL BASELINE ESTABLISHED</span>
-            </div>
-            <h3 class="wc-baseline-headline">Baseline recorded for ${escape(pageData?.company || pageData?.ticker || 'this document')}</h3>
-            <p class="wc-baseline-desc">
-              No prior version history exists for this document, so no changes are displayed. This initial baseline has been saved to your local history. Future filings, revisions, or page updates will automatically be compared against this baseline to track material YoY and period changes.
-            </p>
-            <div class="wc-baseline-meta-row">
-              <span class="wc-baseline-meta">Recorded: <strong>${new Date().toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}</strong></span>
-              <span class="wc-baseline-meta">Scope: <strong>${escape(pageData?.ticker || pageData?.formType || 'Document')}</strong></span>
-            </div>
-            <div style="margin-top: 10px; display: flex; gap: 8px;">
-              <button class="coral-btn" id="btn-sp-wc-new-snapshot" style="font-size: 11px; padding: 5px 10px;">
-                + Record Revision Snapshot
-              </button>
-            </div>
-          </div>
-        </div>
-      `;
-
-      const wcReturnBtn = document.getElementById('btn-sp-wc-return-page-doc');
-      if (wcReturnBtn) {
-        wcReturnBtn.addEventListener('click', () => closeFilingSummaryView());
-      }
-
-      const newSnapBtn = document.getElementById('btn-sp-wc-new-snapshot');
-      if (newSnapBtn) {
-        newSnapBtn.addEventListener('click', async () => {
-          const revPeriod = `Revision · ${new Date().toLocaleDateString()} ${new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`;
-          const items = (summaryResult && Array.isArray(summaryResult.whatChanged) && summaryResult.whatChanged.length > 0)
-            ? summaryResult.whatChanged
-            : (ai ? ai.extractDynamicWhatChanged({
-                text: currentText,
-                company: pageData?.company || 'Company',
-                ticker: pageData?.ticker || 'TICKER',
-                formType: pageData?.formType || 'Report'
-              }) : []);
-          await storageService.saveFilingSnapshot(scopeKey, pageData?.formType || 'Document', revPeriod, {
-            text: currentText,
-            savedAt: new Date().toISOString(),
-            whatChanged: items,
-          });
-          renderWhatChangedTab(container);
-        });
-      }
-      return;
+    const latestRevision = (history && history.length > 0) ? history[0] : null;
+    let latestData = null;
+    if (latestRevision) {
+      const d = await storageService.get(latestRevision.key);
+      latestData = d ? d[latestRevision.key] : null;
     }
 
-    // CASE B: History IS present
-    const latestRevision = history[0];
-    const baselineItem = history[history.length - 1];
-
-    if (history.length === 1 && (!latestRevision.whatChanged || latestRevision.whatChanged.length === 0)) {
-      container.innerHTML = `
-        <div class="what-changed-view">
-          ${
-            activeFilingContext
-              ? `
-              <div class="active-filing-banner">
-                <div class="filing-banner-left">
-                  <span class="filing-banner-tag">SEC ${activeFilingContext.formType}</span>
-                  <span class="filing-banner-title" title="${activeFilingContext.company} (${activeFilingContext.ticker})">${activeFilingContext.company} (${activeFilingContext.ticker}) · Shifts vs Prior Filing</span>
-                </div>
-                <div class="filing-banner-actions">
-                  <a href="${activeFilingContext.sourceUrl}" target="_blank" rel="noopener" class="filing-banner-source-link" title="Open official SEC EDGAR filing">View source ↗</a>
-                  <button type="button" class="filing-banner-back-btn" id="btn-sp-wc-return-page-doc" title="Return to current webpage document">✕ Close</button>
-                </div>
-              </div>
-            `
-              : ''
-          }
-          <div class="what-changed-header">
-            <h2 class="what-changed-title">What changed</h2>
-            <span class="wc-baseline-status-badge">● Baseline Active</span>
-          </div>
-
-          <div class="wc-baseline-card">
-            <div class="wc-card-category">
-              <span class="wc-cat-dot">●</span>
-              <span>INITIAL BASELINE ESTABLISHED</span>
-            </div>
-            <h3 class="wc-baseline-headline">Baseline recorded for ${escape(pageData?.company || pageData?.ticker || 'this document')}</h3>
-            <p class="wc-baseline-desc">
-              Initial baseline snapshot is active (saved ${new Date(baselineItem.savedAt).toLocaleDateString()}). No subsequent revisions have been recorded yet. Click below to record a new revision snapshot to track changes.
-            </p>
-            <div class="wc-baseline-meta-row">
-              <span class="wc-baseline-meta">Baseline: <strong>${baselineItem.period || 'Initial'}</strong></span>
-              <span class="wc-baseline-meta">History: <strong>1 Snapshot</strong></span>
-            </div>
-            <div style="margin-top: 10px; display: flex; gap: 8px;">
-              <button class="coral-btn" id="btn-sp-wc-new-snapshot" style="font-size: 11px; padding: 5px 10px;">
-                + Record Revision Snapshot
-              </button>
-            </div>
-          </div>
-        </div>
-      `;
-
-      const wcReturnBtn = document.getElementById('btn-sp-wc-return-page-doc');
-      if (wcReturnBtn) {
-        wcReturnBtn.addEventListener('click', () => closeFilingSummaryView());
-      }
-
-      const newSnapBtn = document.getElementById('btn-sp-wc-new-snapshot');
-      if (newSnapBtn) {
-        newSnapBtn.addEventListener('click', async () => {
-          const revPeriod = `Revision · ${new Date().toLocaleDateString()} ${new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`;
-          const items = (summaryResult && Array.isArray(summaryResult.whatChanged) && summaryResult.whatChanged.length > 0)
-            ? summaryResult.whatChanged
-            : (ai ? ai.extractDynamicWhatChanged({
-                text: currentText,
-                company: pageData?.company || 'Company',
-                ticker: pageData?.ticker || 'TICKER',
-                formType: pageData?.formType || 'Report'
-              }) : []);
-          await storageService.saveFilingSnapshot(scopeKey, pageData?.formType || 'Document', revPeriod, {
-            text: currentText,
-            savedAt: new Date().toISOString(),
-            whatChanged: items,
-          });
-          renderWhatChangedTab(container);
-        });
-      }
-      return;
-    }
-
-    // CASE C: Multiple revisions exist OR changes were detected in the latest revision
-    let items = (latestRevision.whatChanged && latestRevision.whatChanged.length > 0)
-      ? latestRevision.whatChanged
-      : (summaryResult && Array.isArray(summaryResult.whatChanged) && summaryResult.whatChanged.length > 0
+    // Show what changed from the first visit without requiring a manual baseline!
+    let items = (latestData && Array.isArray(latestData.whatChanged) && latestData.whatChanged.length > 0)
+      ? latestData.whatChanged
+      : ((summaryResult && Array.isArray(summaryResult.whatChanged) && summaryResult.whatChanged.length > 0)
         ? summaryResult.whatChanged
         : (ai ? ai.extractDynamicWhatChanged({
             text: currentText,
@@ -1511,26 +1388,45 @@ document.addEventListener('DOMContentLoaded', async () => {
             formType: pageData?.formType || 'Report'
           }) : []));
 
-    const historyOptionsHTML = history.map((snap, idx) => {
-      const isLatest = idx === 0;
-      const isBase = idx === history.length - 1;
-      const label = isLatest
-        ? `Latest Revision: ${snap.period || new Date(snap.savedAt).toLocaleDateString()}`
-        : (isBase ? `Baseline: ${snap.period || new Date(snap.savedAt).toLocaleDateString()}` : `Revision ${history.length - idx}: ${snap.period || new Date(snap.savedAt).toLocaleDateString()}`);
-      return `<option value="${snap.key}" ${isLatest ? 'selected' : ''}>${escape(label)}</option>`;
-    }).join('');
+    if (latestRevision && latestData && (!latestData.whatChanged || latestData.whatChanged.length === 0) && items.length > 0) {
+      await storageService.set({
+        [latestRevision.key]: {
+          ...latestData,
+          whatChanged: items,
+        }
+      });
+    }
+
+    const isFirstVisit = !history || history.length <= 1;
+
+    const historyOptionsHTML = (history && history.length > 0)
+      ? history.map((snap, idx) => {
+          const isLatest = idx === 0;
+          const isBase = idx === history.length - 1;
+          const label = isBase
+            ? `Baseline (1st Visit): ${snap.period || new Date(snap.savedAt).toLocaleDateString()}`
+            : (isLatest ? `Latest Revision: ${snap.period || new Date(snap.savedAt).toLocaleDateString()}` : `Revision ${history.length - idx}: ${snap.period || new Date(snap.savedAt).toLocaleDateString()}`);
+          return `<option value="${snap.key}" ${isLatest ? 'selected' : ''}>${escape(label)}</option>`;
+        }).join('')
+      : `<option value="auto_baseline">Baseline (1st Visit): ${escape(currentPeriod)}</option>`;
 
     const renderCards = (filterType) => {
       const filtered = items.filter(item => {
         if (filterType === 'all') return true;
-        if (filterType === 'financial' && item.type === 'financial') return true;
-        if (filterType === 'risk' && item.type === 'risk') return true;
-        if (filterType === 'operational' && item.type === 'operational') return true;
+        if (filterType === 'financial') return item.type === 'financial' || !item.type;
+        if (filterType === 'risk') return item.type === 'risk' || (item.category && item.category.toLowerCase().includes('risk'));
+        if (filterType === 'operational') return item.type === 'operational' || (item.category && (item.category.toLowerCase().includes('coatings') || item.category.toLowerCase().includes('services') || item.category.toLowerCase().includes('capex')));
         return true;
       });
 
       if (filtered.length === 0) {
-        return `<div style="padding: 24px; text-align: center; color: #8a877f; font-size: 13px;">No ${filterType} changes found for this revision.</div>`;
+        return `
+          <div style="padding: 24px; text-align: center; color: #8a877f; font-size: 13px;">
+            ${isFirstVisit
+              ? 'Baseline recorded automatically. No specific ' + filterType + ' shifts detected in this document text.'
+              : 'No ' + filterType + ' changes found for this revision.'}
+          </div>
+        `;
       }
 
       return filtered.map(item => {
@@ -1556,6 +1452,10 @@ document.addEventListener('DOMContentLoaded', async () => {
       }).join('');
     };
 
+    const statusBadgeHTML = isFirstVisit
+      ? `<span class="wc-baseline-status-badge" style="background: rgba(35,101,75,0.08); color: #23654b; border-color: rgba(35,101,75,0.2);">● 1st Visit Auto-Tracked</span>`
+      : `<span class="wc-baseline-status-badge">● ${history.length} Snapshots Tracked</span>`;
+
     container.innerHTML = `
       <div class="what-changed-view">
         ${
@@ -1575,7 +1475,10 @@ document.addEventListener('DOMContentLoaded', async () => {
             : ''
         }
         <div class="what-changed-header">
-          <h2 class="what-changed-title">What changed</h2>
+          <div style="display: flex; align-items: center; gap: 8px;">
+            <h2 class="what-changed-title">What changed</h2>
+            ${statusBadgeHTML}
+          </div>
           <select class="wc-filter-select" id="wc-sp-filter-select">
             <option value="all">All changes</option>
             <option value="financial">Financial metrics</option>
@@ -1612,12 +1515,22 @@ document.addEventListener('DOMContentLoaded', async () => {
     }
 
     const historySelect = document.getElementById('wc-sp-history-select');
-    if (historySelect) {
+    if (historySelect && cardsContainer) {
       historySelect.addEventListener('change', async (e) => {
         const selectedKey = e.target.value;
         const data = await storageService.get(selectedKey);
-        if (data && data[selectedKey] && Array.isArray(data[selectedKey].whatChanged)) {
-          items = data[selectedKey].whatChanged;
+        if (data && data[selectedKey]) {
+          const snap = data[selectedKey];
+          if (Array.isArray(snap.whatChanged) && snap.whatChanged.length > 0) {
+            items = snap.whatChanged;
+          } else {
+            items = ai ? ai.extractDynamicWhatChanged({
+              text: snap.text || currentText,
+              company: pageData?.company || 'Company',
+              ticker: pageData?.ticker || 'TICKER',
+              formType: pageData?.formType || 'Report'
+            }) : [];
+          }
           cardsContainer.innerHTML = renderCards(filterSelect ? filterSelect.value : 'all');
         }
       });
@@ -1639,7 +1552,12 @@ document.addEventListener('DOMContentLoaded', async () => {
           text: currentText,
           savedAt: new Date().toISOString(),
           whatChanged: freshItems,
+          isBaseline: false,
+          url: pageData?.url || '',
+          company: pageData?.company || pageData?.ticker || 'Document',
+          ticker: pageData?.ticker || '',
         });
+        showToast('New snapshot recorded');
         renderWhatChangedTab(container);
       });
     }
@@ -2818,15 +2736,22 @@ document.addEventListener('DOMContentLoaded', async () => {
           fallback = `**Executive Takeaway:** Analysis for **"${q}"** synthesizes available operational disclosures and financial principles.\n\n• **Core Analysis:** Topic inquiries examine underlying market dynamics, balance sheet mechanics, or disclosed guidance.\n• **Verification:** Review corresponding filing tables and notes for itemized data points.\n\n*Source: Evaluated from financial disclosures and reference analysis.*`;
         }
 
-        const errorBanner = `
-          <div class="adv-error-notice" style="margin-bottom: 12px; padding: 10px 14px; background: #fff5f2; border: 1px solid #f2d4cc; border-radius: 8px; font-size: 12px; color: #a9583e; display: flex; justify-content: space-between; align-items: center;">
-            <div>
-              <strong>⚠️ API Notice:</strong> ${err.message || 'Unable to connect to AI provider'}.
+        if (!fallback) {
+          const errorBanner = `
+            <div class="adv-error-notice" style="margin-bottom: 12px; padding: 10px 14px; background: #fff5f2; border: 1px solid #f2d4cc; border-radius: 8px; font-size: 12px; color: #a9583e; display: flex; justify-content: space-between; align-items: center;">
+              <div>
+                <strong>⚠️ API Notice:</strong> ${err.message || 'Unable to connect to AI provider'}.
+              </div>
+              <button type="button" class="coral-btn btn-sp-adv-settings" style="font-size: 11px; padding: 4px 8px; margin-left: 10px; white-space: nowrap;">Settings</button>
             </div>
-            <button type="button" class="coral-btn btn-sp-adv-settings" style="font-size: 11px; padding: 4px 8px; margin-left: 10px; white-space: nowrap;">Settings</button>
-          </div>
-        `;
-        let responseHtml = errorBanner + formatDeepResearchResponse(fallback);
+          `;
+          respText.innerHTML = errorBanner;
+          const advSetBtn = respCard.querySelector('.btn-sp-adv-settings');
+          if (advSetBtn) advSetBtn.addEventListener('click', openSettings);
+          return;
+        }
+
+        let responseHtml = formatDeepResearchResponse(fallback);
         if (webSources && webSources.length > 0) {
           responseHtml += `
             <div class="adv-web-citations-box">
@@ -2889,9 +2814,68 @@ document.addEventListener('DOMContentLoaded', async () => {
 
   // Listen for tab switches
   if (typeof chrome !== 'undefined' && chrome.tabs && chrome.tabs.onActivated) {
-    chrome.tabs.onActivated.addListener(async () => {
+    chrome.tabs.onActivated.addListener(async (activeInfo) => {
+      try {
+        if (activeInfo && activeInfo.tabId) {
+          const tab = await chrome.tabs.get(activeInfo.tabId);
+          if (tab && tab.url && (
+            tab.url.startsWith('chrome-extension://') ||
+            tab.url.startsWith('chrome://') ||
+            tab.url.startsWith('edge://') ||
+            tab.url.startsWith('about:') ||
+            tab.url.includes('options/options.html')
+          )) {
+            // User switched to Settings / Options or internal page — do NOT wipe the analysis!
+            return;
+          }
+        }
+      } catch (e) {}
+
       await loadActivePageData();
       renderBaseUI();
+    });
+  }
+
+  // Disappear the panel when the active tab is refreshed or navigated
+  if (typeof chrome !== 'undefined' && chrome.tabs && chrome.tabs.onUpdated) {
+    chrome.tabs.onUpdated.addListener(async (tabId, changeInfo, tab) => {
+      try {
+        // Only act on the tab currently tracked by this panel
+        if (!activeTab || tabId !== activeTab.id) return;
+
+        if (changeInfo.status === 'loading') {
+          // ── PAGE IS LOADING ──────────────────────────────────────────────
+          // 1. Increment version FIRST — invalidates all in-flight async ops
+          pageVersion++;
+
+          // 2. Wipe the ENTIRE panel root synchronously — panel disappears instantly
+          if (root) root.innerHTML = '';
+
+          // 3. Reset every piece of in-memory state
+          summaryResult = null;
+          pageData = {};
+          proceedAnyway = false;
+          isAnalyzing = false;
+          lastAnalysisError = null;
+          activeTabName = 'summary';
+          activeFilingContext = null;
+          originalPageState = null;
+
+          // 4. Update activeTab immediately (URL may differ on navigation)
+          activeTab = tab;
+
+
+        } else if (changeInfo.status === 'complete') {
+          // ── PAGE FULLY LOADED ────────────────────────────────────────────
+          // Content scripts are injected — safe to fetch page data and re-render
+          activeTab = tab;
+          await loadActivePageData();
+          // Guard: if another navigation happened while we were loading, don't render
+          if (activeTab && activeTab.id === tab.id) {
+            renderBaseUI();
+          }
+        }
+      } catch (e) {}
     });
   }
 });

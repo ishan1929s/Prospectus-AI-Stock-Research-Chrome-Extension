@@ -42,6 +42,26 @@ class StorageService {
     }
   }
 
+  canUseFallback() {
+    // SECURITY: NEVER use localStorage fallback if running within an injected content script on a webpage.
+    // Webpage localStorage is visible to any third-party scripts on that domain and would leak API keys and sensitive settings.
+    // Only allow localStorage fallback in standalone extension pages (chrome-extension://) or local dev when chrome.storage is unavailable.
+    try {
+      if (this.isContextValid()) {
+        return false; // Extension storage is active; no fallback needed or permitted
+      }
+      if (typeof window === 'undefined' || typeof localStorage === 'undefined') {
+        return false;
+      }
+      if (window.location && window.location.protocol) {
+        return window.location.protocol === 'chrome-extension:' || window.location.protocol === 'file:';
+      }
+      return false;
+    } catch (e) {
+      return false;
+    }
+  }
+
   async get(keys) {
     let result = {};
     const keyList = Array.isArray(keys) ? keys : typeof keys === 'string' ? [keys] : Object.keys(keys || {});
@@ -69,29 +89,22 @@ class StorageService {
             resolve({});
           }
         });
+        return result;
       } catch (e) {
         result = {};
       }
     }
 
-    const fallback = this.getFallback(keyList);
-    const combined = { ...fallback, ...result };
-
-    // If chrome storage returned empty array for a key, but fallback has stored items, prioritize fallback
-    for (const k of keyList) {
-      if ((!combined[k] || (Array.isArray(combined[k]) && combined[k].length === 0)) && fallback[k] && Array.isArray(fallback[k]) && fallback[k].length > 0) {
-        combined[k] = fallback[k];
-      }
+    if (this.canUseFallback()) {
+      const fallback = this.getFallback(keyList);
+      return { ...fallback, ...result };
     }
 
-    return combined;
+    return result;
   }
 
   async set(items) {
-    // 1. Always mirror to localStorage fallback immediately so page refreshes and standalone demo pages never lose data
-    this.setFallback(items);
-
-    // 2. Persist to chrome.storage.local if extension context is active
+    // 1. Persist to chrome.storage.local if extension context is active
     if (this.isContextValid()) {
       try {
         await new Promise((resolve) => {
@@ -110,17 +123,22 @@ class StorageService {
             resolve();
           }
         });
+        return;
       } catch (e) {}
+    }
+
+    // 2. Only fallback if permitted (standalone extension page or local mock environment)
+    if (this.canUseFallback()) {
+      this.setFallback(items);
     }
   }
 
   async remove(keys) {
-    try {
-      if (this.isContextValid()) {
+    if (this.isContextValid()) {
+      try {
         return await new Promise((resolve) => {
           try {
             if (!this.isContextValid()) {
-              this.removeFallback(keys);
               resolve();
               return;
             }
@@ -131,19 +149,21 @@ class StorageService {
               resolve();
             });
           } catch (err) {
-            this.removeFallback(keys);
             resolve();
           }
         });
+      } catch (e) {
+        return;
       }
-    } catch (e) {
-      this.removeFallback(keys);
-      return;
     }
-    this.removeFallback(keys);
+
+    if (this.canUseFallback()) {
+      this.removeFallback(keys);
+    }
   }
 
   getFallback(keys) {
+    if (!this.canUseFallback()) return {};
     const res = {};
     const keyList = Array.isArray(keys) ? keys : typeof keys === 'string' ? [keys] : Object.keys(keys || {});
     for (const k of keyList) {
@@ -158,6 +178,7 @@ class StorageService {
   }
 
   setFallback(items) {
+    if (!this.canUseFallback()) return;
     for (const [k, v] of Object.entries(items || {})) {
       try {
         if (typeof localStorage !== 'undefined') {
@@ -170,6 +191,7 @@ class StorageService {
   }
 
   removeFallback(keys) {
+    if (!this.canUseFallback()) return;
     const keyList = Array.isArray(keys) ? keys : typeof keys === 'string' ? [keys] : [];
     for (const k of keyList) {
       try {
@@ -199,14 +221,70 @@ class StorageService {
   async getUsageInfo() {
     const settings = await this.getSettings();
     const key = (settings.licenseKey || '').trim().toUpperCase();
-    const isLicensed = !!settings.isLicensed && !!key && ['PRS-8F2A-4D9C-7B1E', 'PRS-5E3B-9A7D-2C6F'].includes(key);
+    const isLicensed = !!settings.isLicensed && !!key && (
+      typeof LicenseService !== 'undefined'
+        ? LicenseService.isKeyValid(key)
+        : (['PRS-8F2A-4D9C-7B1E', 'PRS-5E3B-9A7D-2C6F'].includes(key) || /^PRS-[0-9A-Z]{4}-[0-9A-Z]{4}-[0-9A-Z]{4}$/.test(key))
+    );
     return {
       isLicensed,
       licenseKey: isLicensed ? key : '',
     };
   }
 
+  // --- Analysis Cache (Preserves analysis when switching tabs or changing options) ---
+  _normalizeUrlKey(rawUrl) {
+    if (!rawUrl || typeof rawUrl !== 'string') return '';
+    try {
+      const u = new URL(rawUrl);
+      return (u.origin + u.pathname + u.search).replace(/#.*$/, '').slice(0, 300);
+    } catch (e) {
+      return rawUrl.replace(/#.*$/, '').slice(0, 300);
+    }
+  }
+
+  async getAnalysisCache(url) {
+    const norm = this._normalizeUrlKey(url);
+    if (!norm) return null;
+    const key = `analysis_cache_${norm}`.replace(/[^a-zA-Z0-9_]/g, '_');
+    const data = await this.get(key);
+    return data[key] || null;
+  }
+
+  async saveAnalysisCache(url, cacheData) {
+    const norm = this._normalizeUrlKey(url);
+    if (!norm || !cacheData) return;
+    const key = `analysis_cache_${norm}`.replace(/[^a-zA-Z0-9_]/g, '_');
+    await this.set({
+      [key]: {
+        ...cacheData,
+        savedAt: Date.now(),
+      }
+    });
+  }
+
+  async clearAnalysisCache(url) {
+    const norm = this._normalizeUrlKey(url);
+    if (!norm) return;
+    const key = `analysis_cache_${norm}`.replace(/[^a-zA-Z0-9_]/g, '_');
+    await this.remove(key);
+  }
+
   // --- Filing & Page Snapshots (For "What Changed" Diff Engine) ---
+  getSnapshotScopeKey(pageData, activeFilingContext = null) {
+    if (activeFilingContext && activeFilingContext.ticker) {
+      return `filing_${activeFilingContext.ticker.toUpperCase().replace(/[^a-zA-Z0-9]/g, '_')}`;
+    }
+    if (pageData && pageData.ticker && pageData.ticker !== 'PAGE' && pageData.ticker !== 'PDF' && pageData.ticker !== 'QUOTE' && pageData.ticker !== 'ARTICLE') {
+      const ticker = pageData.ticker.toUpperCase().replace(/[^a-zA-Z0-9]/g, '_');
+      const formType = (pageData.formType || 'Doc').replace(/[^a-zA-Z0-9]/g, '_');
+      return `stock_${ticker}_${formType}`;
+    }
+    const rawUrl = pageData?.url || (typeof window !== 'undefined' ? window.location.href : '');
+    const norm = this._normalizeUrlKey(rawUrl) || 'page';
+    return `doc_${norm.replace(/[^a-zA-Z0-9]/g, '_').slice(0, 70)}`;
+  }
+
   async getFilingSnapshot(ticker, formType, period) {
     const cleanTicker = (ticker || 'PAGE').toUpperCase();
     const cleanPeriod = (period || 'latest').replace(/[^a-zA-Z0-9_]/g, '_');
@@ -231,20 +309,111 @@ class StorageService {
         formType: formType || 'Document',
         period: periodLabel,
         savedAt: nowIso,
-        url: typeof window !== 'undefined' ? window.location.href : '',
+        url: snapshotData?.url || (typeof window !== 'undefined' ? window.location.href : ''),
         hostname: typeof window !== 'undefined' ? window.location.hostname : '',
       },
     });
 
     // Update the index of snapshots for this specific website/scope ONLY
     const idxData = await this.get(indexKey);
-    const list = idxData[indexKey] || [];
+    let list = idxData[indexKey] || [];
     const exists = list.find((item) => item.key === key);
     if (!exists) {
       list.unshift({ key, formType: formType || 'Document', period: periodLabel, savedAt: nowIso, scopeKey: cleanScope });
+      if (list.length > 20) {
+        const toPrune = list.slice(20);
+        list = list.slice(0, 20);
+        await this.remove(toPrune.map(p => p.key));
+      }
       await this.set({ [indexKey]: list });
     }
     return { key, period: periodLabel };
+  }
+
+  async autoRecordSnapshot({ scopeKey, pageData, summaryResult, formType, aiService } = {}) {
+    try {
+      if (!pageData || pageData.isYouTube) return null;
+      const key = scopeKey || this.getSnapshotScopeKey(pageData);
+      if (!key) return null;
+
+      const currentText = pageData.fullText || pageData.riskFactorsText || pageData.extractedText || pageData.bodyText || pageData.company || '';
+      if (!currentText || currentText.trim().length < 20) return null;
+
+      const currentPeriod = pageData.periodBadge || pageData.filingDate || new Date().toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+      const history = await this.getFilingHistory(key);
+
+      const getItems = () => {
+        if (summaryResult && Array.isArray(summaryResult.whatChanged) && summaryResult.whatChanged.length > 0) {
+          return summaryResult.whatChanged;
+        }
+        if (aiService && typeof aiService.extractDynamicWhatChanged === 'function') {
+          return aiService.extractDynamicWhatChanged({
+            text: currentText,
+            company: pageData.company || 'Company',
+            ticker: pageData.ticker || 'TICKER',
+            formType: pageData.formType || 'Report',
+          });
+        }
+        return [];
+      };
+
+      // 1. FIRST VISIT: No prior history exists -> Automatically save Initial Baseline in background
+      if (!history || history.length === 0) {
+        const baselinePeriod = `Initial Baseline · ${currentPeriod}`;
+        const items = getItems();
+        return await this.saveFilingSnapshot(key, formType || pageData.formType || 'Document', baselinePeriod, {
+          text: currentText,
+          savedAt: new Date().toISOString(),
+          summary: summaryResult ? (summaryResult.overview || '') : '',
+          whatChanged: items,
+          isBaseline: true,
+          url: pageData.url || (typeof window !== 'undefined' ? window.location.href : ''),
+          company: pageData.company || pageData.ticker || 'Document',
+          ticker: pageData.ticker || '',
+        });
+      }
+
+      // 2. SUBSEQUENT VISIT: History exists -> Check if content or analysis updated
+      const latestItem = history[0];
+      const latestData = await this.get(latestItem.key);
+      const latestSnap = latestData ? latestData[latestItem.key] : null;
+
+      if (latestSnap) {
+        const items = getItems();
+
+        // If latest snapshot lacked whatChanged but we now have items (e.g. from analysis), enrich it
+        if ((!latestSnap.whatChanged || latestSnap.whatChanged.length === 0) && items.length > 0) {
+          latestSnap.whatChanged = items;
+          if (summaryResult && summaryResult.overview) latestSnap.summary = summaryResult.overview;
+          await this.set({ [latestItem.key]: latestSnap });
+        }
+
+        // Check if content has materially changed from latest snapshot
+        const oldText = latestSnap.text || '';
+        const textChanged = (Math.abs(oldText.length - currentText.length) > 50) ||
+                            (oldText.slice(0, 300) !== currentText.slice(0, 300));
+
+        const timeDiff = Date.now() - new Date(latestSnap.savedAt).getTime();
+        const minIntervalPassed = timeDiff > (3 * 60 * 1000); // 3 minutes debounce between auto revisions
+
+        if (textChanged && minIntervalPassed) {
+          const revPeriod = `Revision · ${new Date().toLocaleDateString()} ${new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`;
+          return await this.saveFilingSnapshot(key, formType || pageData.formType || 'Document', revPeriod, {
+            text: currentText,
+            savedAt: new Date().toISOString(),
+            whatChanged: items,
+            isBaseline: false,
+            url: pageData.url || (typeof window !== 'undefined' ? window.location.href : ''),
+            company: pageData.company || pageData.ticker || 'Document',
+            ticker: pageData.ticker || '',
+          });
+        }
+      }
+
+      return null;
+    } catch (err) {
+      return null;
+    }
   }
 
   async getFilingHistory(scopeKey) {

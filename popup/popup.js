@@ -92,11 +92,16 @@ document.addEventListener('DOMContentLoaded', async () => {
               'services/storage-service.js',
               'services/license-service.js',
               'services/ai-service.js',
+              'services/pdf-extractor.js',
+              'services/watchlist-service.js',
               'content/extractors.js',
               'content/diff-engine.js',
               'content/content.js',
             ],
           });
+          setTimeout(() => {
+            chrome.tabs.sendMessage(activeTab.id, { action: 'TOGGLE_PANEL' }).catch(() => {});
+          }, 150);
         } catch (err) {}
       });
     }
@@ -128,11 +133,16 @@ document.addEventListener('DOMContentLoaded', async () => {
               'services/storage-service.js',
               'services/license-service.js',
               'services/ai-service.js',
+              'services/pdf-extractor.js',
+              'services/watchlist-service.js',
               'content/extractors.js',
               'content/diff-engine.js',
               'content/content.js',
             ],
           });
+          setTimeout(() => {
+            chrome.tabs.sendMessage(activeTab.id, { action: 'TOGGLE_PANEL' }).catch(() => {});
+          }, 150);
         } catch (err) {}
       });
     }

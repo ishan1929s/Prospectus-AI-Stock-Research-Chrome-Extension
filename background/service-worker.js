@@ -3,21 +3,27 @@
  * Manages context menus, alarms, keyboard shortcuts, and tab messaging.
  */
 
-// Silence console.warn and console.error in service worker to prevent Chrome from logging errors in chrome://extensions
-if (typeof console !== 'undefined') {
-  try {
-    console.warn = () => {};
-    console.error = () => {};
-  } catch (e) {}
-}
-
-// Global error handlers to prevent unhandled rejections or runtime crashes from throwing to Chrome
+// Global error handlers for background worker to catch benign extension channel disconnects
 self.addEventListener('unhandledrejection', (event) => {
-  event.preventDefault();
+  const msg = (event && event.reason && (event.reason.message || String(event.reason))) || '';
+  if (
+    msg.includes('Extension context invalidated') ||
+    msg.includes('message port closed') ||
+    msg.includes('Receiving end does not exist')
+  ) {
+    event.preventDefault();
+  }
 });
 
 self.addEventListener('error', (event) => {
-  event.preventDefault();
+  const msg = (event && event.message) || '';
+  if (
+    msg.includes('Extension context invalidated') ||
+    msg.includes('message port closed') ||
+    msg.includes('Receiving end does not exist')
+  ) {
+    event.preventDefault();
+  }
 });
 
 // Initialize context menus and alarms on extension install
@@ -104,16 +110,6 @@ chrome.contextMenus.onClicked.addListener(async (info, tab) => {
         text: info.selectionText,
       });
     }
-  }
-});
-
-// Handle Toolbar Icon Click (when no default_popup or on demand)
-chrome.action.onClicked.addListener(async (tab) => {
-  if (!tab || !tab.id || isExcludedUrl(tab.url)) return;
-  try {
-    await chrome.tabs.sendMessage(tab.id, { action: 'TOGGLE_PANEL' });
-  } catch (err) {
-    await injectAndSendMessage(tab.id, { action: 'TOGGLE_PANEL' });
   }
 });
 
@@ -328,6 +324,38 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     return true;
   }
 
+  // Handle Background Ticker Search across 10,400+ US Stocks Registry
+  if (message && message.action === 'SEARCH_TICKERS') {
+    (async () => {
+      try {
+        const storage = new StorageService();
+        const ai = new AIService(storage);
+        const ws = new WatchlistService(storage, ai);
+        const results = await ws.searchTickers(message.query, message.limit || 8);
+        sendResponse({ success: true, results: results || [] });
+      } catch (err) {
+        sendResponse({ success: false, error: err.message, results: [] });
+      }
+    })();
+    return true;
+  }
+
+  // Handle Background Stock Resolution (CIK, Name, Exchange)
+  if (message && message.action === 'RESOLVE_STOCK_INFO') {
+    (async () => {
+      try {
+        const storage = new StorageService();
+        const ai = new AIService(storage);
+        const ws = new WatchlistService(storage, ai);
+        const info = ws.resolveStockInfo(message.ticker, message.defaultName);
+        sendResponse({ success: true, info });
+      } catch (err) {
+        sendResponse({ success: false, error: err.message, info: null });
+      }
+    })();
+    return true;
+  }
+
   return true;
 });
 
@@ -346,7 +374,6 @@ async function injectAndSendMessage(tabId, message) {
         'services/license-service.js',
         'services/ai-service.js',
         'services/pdf-extractor.js',
-        'services/us-stocks.js',
         'services/watchlist-service.js',
         'content/extractors.js',
         'content/diff-engine.js',

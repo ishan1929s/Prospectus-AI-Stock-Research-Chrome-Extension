@@ -55,23 +55,21 @@ Unlike automated trading bots or prediction tools, Prospectus does **not** provi
 | `contextMenus` | Adds right-click actions ("Explain term with Prospectus", "Save to Prospectus Notebook") on highlighted text. |
 | `alarms` | Triggers the optional daily background refresh for the user's local Watchlist digest. |
 | `scripting` | Programmatically injects the research panel UI when requested by the user on general web pages. |
-| `tabs` | Identifies active tab URLs and titles to detect financial tickers and page context. |
+| `sidePanel` | Displays the research copilot in Chrome's native side panel alongside native PDF documents and reports. |
+| `notifications` | Notifies the user when their automated daily watchlist digest has identified new SEC filings or material updates. |
+| `tabs` | Accesses active tab URLs and titles to detect financial tickers and page context. |
 
 ### Host Permissions Justifications
 
 | Host Permission | Justification |
 |---|---|
-| `https://*.sec.gov/*` | Extracts SEC EDGAR filings (10-K, 10-Q, 8-K) and risk factors for automatic summarization and diffing. |
-| `https://*.finance.yahoo.com/*` | Extracts stock tickers, company profiles, and headlines for tone analysis. |
-| `https://*.seekingalpha.com/*` | Analyzes earnings transcripts and financial articles. |
-| `https://*.tradingview.com/*` | Reads stock symbol context and market news chatter. |
-| `https://*.marketwatch.com/*` | Extracts company news feeds and financial overviews. |
-| `https://*.finviz.com/*` | Reads financial screener news feeds. |
-| `https://api.openai.com/*` | Connects directly to OpenAI using the user's BYOK key. |
-| `https://api.anthropic.com/*` | Connects directly to Anthropic Claude using the user's BYOK key. |
-| `https://generativelanguage.googleapis.com/*` | Connects directly to Google Gemini using the user's BYOK key. |
+| `<all_urls>` | Enables users to summon the research panel, explain complex financial jargon, and organize notes across arbitrary corporate investor relations sites, press releases, and global financial portals. |
+| `https://api.openai.com/*` | Connects directly to OpenAI endpoints using the user's BYOK key. |
+| `https://api.anthropic.com/*` | Connects directly to Anthropic Claude endpoints using the user's BYOK key. |
+| `https://generativelanguage.googleapis.com/*` | Connects directly to Google Gemini endpoints using the user's BYOK key. |
 | `https://openrouter.ai/*` | Connects directly to OpenRouter endpoints using the user's BYOK key. |
-| `https://api.gumroad.com/*` | Verifies one-time purchase license keys for premium activation. |
+| `https://query1.finance.yahoo.com/*` | Fetches real-time price quotes, intraday day ranges, and currency metadata for tracked stocks. |
+| `https://query2.finance.yahoo.com/*` | Secondary failover host for real-time market data quotes and ticker search. |
 
 ---
 

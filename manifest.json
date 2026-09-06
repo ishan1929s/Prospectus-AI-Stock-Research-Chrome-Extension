@@ -45,7 +45,6 @@
     "https://api.anthropic.com/*",
     "https://generativelanguage.googleapis.com/*",
     "https://openrouter.ai/*",
-    "https://api.gumroad.com/*",
     "https://query1.finance.yahoo.com/*",
     "https://query2.finance.yahoo.com/*"
   ],
@@ -73,7 +72,6 @@
         "services/license-service.js",
         "services/ai-service.js",
         "services/pdf-extractor.js",
-        "services/us-stocks.js",
         "services/watchlist-service.js",
         "content/extractors.js",
         "content/diff-engine.js",

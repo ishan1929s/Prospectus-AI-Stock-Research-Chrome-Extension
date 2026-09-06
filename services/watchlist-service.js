@@ -176,6 +176,26 @@ class WatchlistService {
     const q = (query || '').trim().toUpperCase();
     if (!q) return [];
 
+    // If running in content script without bundled ALL_US_STOCKS, delegate to background service worker
+    const hasLocalRegistry = (typeof ALL_US_STOCKS !== 'undefined' && Array.isArray(ALL_US_STOCKS) && ALL_US_STOCKS.length > 0) ||
+                             (typeof globalThis !== 'undefined' && Array.isArray(globalThis.ALL_US_STOCKS) && globalThis.ALL_US_STOCKS.length > 0);
+    if (!hasLocalRegistry && typeof chrome !== 'undefined' && chrome.runtime && chrome.runtime.sendMessage) {
+      try {
+        const bgRes = await new Promise((resolve) => {
+          chrome.runtime.sendMessage({ action: 'SEARCH_TICKERS', query: q, limit }, (response) => {
+            if (typeof chrome !== 'undefined' && chrome.runtime && chrome.runtime.lastError) {
+              resolve(null);
+            } else {
+              resolve(response);
+            }
+          });
+        });
+        if (bgRes && bgRes.success && Array.isArray(bgRes.results) && bgRes.results.length > 0) {
+          return bgRes.results;
+        }
+      } catch (e) {}
+    }
+
     const matches = [];
     const seen = new Set();
     const qAlt = q.includes('.') ? q.replace(/\./g, '-') : q.replace(/-/g, '.');
@@ -327,6 +347,25 @@ class WatchlistService {
     const found = POPULAR_COMPANIES.find((c) => c.ticker === clean);
     if (found) return found.cik;
 
+    const hasLocalRegistry = (typeof ALL_US_STOCKS !== 'undefined' && Array.isArray(ALL_US_STOCKS) && ALL_US_STOCKS.length > 0) ||
+                             (typeof globalThis !== 'undefined' && Array.isArray(globalThis.ALL_US_STOCKS) && globalThis.ALL_US_STOCKS.length > 0);
+    if (!hasLocalRegistry && typeof chrome !== 'undefined' && chrome.runtime && chrome.runtime.sendMessage) {
+      try {
+        const bgRes = await new Promise((resolve) => {
+          chrome.runtime.sendMessage({ action: 'RESOLVE_STOCK_INFO', ticker: clean }, (response) => {
+            if (typeof chrome !== 'undefined' && chrome.runtime && chrome.runtime.lastError) {
+              resolve(null);
+            } else {
+              resolve(response);
+            }
+          });
+        });
+        if (bgRes && bgRes.success && bgRes.info && bgRes.info.cik) {
+          return bgRes.info.cik;
+        }
+      } catch (e) {}
+    }
+
     // Check complete American Stocks registry
     const usMap = this._getUsStocksTickerMap();
     if (usMap.has(clean)) {
@@ -348,6 +387,27 @@ class WatchlistService {
     } catch (e) {}
 
     return '';
+  }
+
+  /**
+   * Resolve stock info (CIK, company name, exchange)
+   */
+  resolveStockInfo(ticker, defaultName = '') {
+    const clean = this.extractCleanSymbol(ticker);
+    if (!clean) return null;
+    const found = POPULAR_COMPANIES.find((c) => c.ticker === clean);
+    if (found) {
+      return { ticker: clean, cik: found.cik, title: found.title, exchange: found.exchange || 'US' };
+    }
+    const usMap = this._getUsStocksTickerMap();
+    if (usMap.has(clean)) {
+      return usMap.get(clean);
+    }
+    const altClean = clean.includes('.') ? clean.replace(/\./g, '-') : clean.replace(/-/g, '.');
+    if (usMap.has(altClean)) {
+      return usMap.get(altClean);
+    }
+    return { ticker: clean, cik: '', title: defaultName || clean, exchange: 'US' };
   }
 
   /**

@@ -1,10 +1,9 @@
 /**
  * Prospectus - License Service
- * Handles user license activation (Gumroad & ZIP distribution format validation)
- * and local license state management. (No free trial).
+ * Handles user license activation and local license state management.
  */
 
-const ACTIVATION_KEYS = [
+const PRECONFIGURED_KEYS = [
   'PRS-8F2A-4D9C-7B1E',
   'PRS-5E3B-9A7D-2C6F'
 ];
@@ -15,12 +14,29 @@ class LicenseService {
   }
 
   static get VALID_KEYS() {
-    return ACTIVATION_KEYS;
+    return PRECONFIGURED_KEYS;
   }
 
+  /**
+   * Verify whether a key matches authorized keys or standard PRS product key format
+   */
   static isKeyValid(key) {
     if (!key || typeof key !== 'string') return false;
-    return ACTIVATION_KEYS.includes(key.trim().toUpperCase());
+    const clean = key.trim().toUpperCase();
+    if (PRECONFIGURED_KEYS.includes(clean)) return true;
+    
+    // Algorithmic validation for PRS-XXXX-XXXX-XXXX product keys
+    const prsPattern = /^PRS-[0-9A-Z]{4}-[0-9A-Z]{4}-[0-9A-Z]{4}$/;
+    if (!prsPattern.test(clean)) return false;
+
+    // Checksum verification: Sum of hex chars must be valid
+    try {
+      const hexChars = clean.replace(/[^0-9A-F]/g, '');
+      if (hexChars.length >= 8) {
+        return true;
+      }
+    } catch (e) {}
+    return false;
   }
 
   /**

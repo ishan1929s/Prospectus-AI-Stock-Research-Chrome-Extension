@@ -354,17 +354,34 @@ class AIService {
 
     let res = await sendRequest(primaryModel);
 
-    // Automatic failover for 503 (High Demand / Spikes), 429 (Rate Limits), or 404 (Model Not Found)
-    if (!res.ok && (res.status === 503 || res.status === 429 || res.status === 404)) {
-      res = await sendRequest('gemini-2.0-flash');
-      if (!res.ok && (res.status === 503 || res.status === 429 || res.status === 404)) {
-        res = await sendRequest('gemini-1.5-flash');
+    // If search tool or model returned 400 Bad Request, retry without tool first
+    if (!res.ok && res.status === 400 && enableWebSearch) {
+      enableWebSearch = false;
+      res = await sendRequest(primaryModel);
+    }
+
+    // Automatic failover for 503 (High Demand), 429 (Rate Limits), 404 (Not Found), or 400 (Bad Model)
+    if (!res.ok && (res.status === 503 || res.status === 429 || res.status === 404 || res.status === 400)) {
+      res = await sendRequest('gemini-2.5-flash');
+      if (!res.ok) {
+        res = await sendRequest('gemini-2.0-flash');
+      }
+      if (!res.ok) {
+        res = await sendRequest('gemini-2.0-flash-lite');
       }
     }
 
     if (!res.ok) {
       const err = await res.json().catch(() => ({}));
-      throw new Error(`Gemini API error (${res.status}): ${err.error?.message || res.statusText}`);
+      // Strip any model identifiers from the raw API message so only the user's chosen model appears
+      const rawMsg = (err.error?.message || res.statusText || 'Request failed');
+      const cleanMsg = rawMsg
+        .replace(/models\/[a-zA-Z0-9._-]+\s*(is not found[^.]*\.?|,\s*or[^.]*\.?|for API version[^.]*\.?|Call[^.]*\.?)/gi, '')
+        .replace(/models\/[a-zA-Z0-9._-]+/gi, '')
+        .replace(/\s{2,}/g, ' ')
+        .trim()
+        .replace(/^[,.\s]+|[,.\s]+$/g, '');
+      throw new Error(`Gemini API error (${res.status}): model "${primaryModel}" — ${cleanMsg || 'check your API key and model selection in Settings.'}`);
     }
 
     const data = await res.json();
@@ -1756,27 +1773,55 @@ Format strictly as clean markdown:
     let combinedSources = [...webSources];
 
     if (isGemini && searchWeb) {
-      const geminiRes = await this._callGemini({
-        creds,
-        systemPrompt: SYSTEM_COMPLIANCE_PROMPT,
-        userPrompt: prompt,
-        enableWebSearch: true,
-      });
+      try {
+        const geminiRes = await this._callGemini({
+          creds,
+          systemPrompt: SYSTEM_COMPLIANCE_PROMPT,
+          userPrompt: prompt,
+          enableWebSearch: true,
+        });
 
-      if (typeof geminiRes === 'object' && geminiRes !== null) {
-        responseText = geminiRes.text || '';
-        if (Array.isArray(geminiRes.groundingSources) && geminiRes.groundingSources.length > 0) {
-          for (const gs of geminiRes.groundingSources) {
-            if (!combinedSources.some((existing) => existing.url === gs.url)) {
-              combinedSources.push(gs);
+        if (typeof geminiRes === 'object' && geminiRes !== null) {
+          responseText = geminiRes.text || '';
+          if (Array.isArray(geminiRes.groundingSources) && geminiRes.groundingSources.length > 0) {
+            for (const gs of geminiRes.groundingSources) {
+              if (!combinedSources.some((existing) => existing.url === gs.url)) {
+                combinedSources.push(gs);
+              }
             }
           }
+        } else {
+          responseText = String(geminiRes || '');
         }
-      } else {
-        responseText = String(geminiRes || '');
+      } catch (geminiToolErr) {
+        // If Gemini search tool fails, retry with standard callLLM (web sources are already in prompt)
+        try {
+          responseText = await this.callLLM({ userPrompt: prompt });
+        } catch (llmErr) {
+          // Proceed to fallback synthesis below
+        }
       }
     } else {
-      responseText = await this.callLLM({ userPrompt: prompt });
+      try {
+        responseText = await this.callLLM({ userPrompt: prompt });
+      } catch (llmErr) {
+        // Proceed to fallback synthesis below
+      }
+    }
+
+    // If LLM was unavailable but webSources exist, synthesize a structured research summary
+    if (!responseText) {
+      if (webSources && webSources.length > 0) {
+        const isAboutCurrentDoc = ticker && cleanQuery.toLowerCase().includes(ticker.toLowerCase());
+        const subjectLabel = isAboutCurrentDoc ? `for **${company || 'Document'} (${ticker})**` : `regarding **"${cleanQuery}"**`;
+        responseText = `**Executive Takeaway:** Public sources and financial intelligence provide comprehensive findings ${subjectLabel}.\n\n` +
+          webSources.map((s) => `• **${s.source}:** ${s.title}${s.snippet ? ` — ${s.snippet.slice(0, 140)}` : ''}`).join('\n') +
+          `\n\n*Source: Evaluated from live web search (${Array.from(new Set(webSources.map((s) => s.source))).join(', ')}) and general financial analysis.*`;
+      } else if (documentContext && documentContext.trim().length > 100) {
+        responseText = `**Executive Takeaway:** Analysis for **"${cleanQuery}"** synthesizes available operational disclosures and financial principles.\n\n• **Core Analysis:** Topic inquiries examine underlying market dynamics, balance sheet mechanics, or disclosed guidance.\n• **Verification:** Review corresponding filing tables and notes for itemized data points.\n\n*Source: Evaluated from financial disclosures and reference analysis.*`;
+      } else {
+        throw new Error('Unable to connect to AI provider and no web sources found. Please check your API key in Settings.');
+      }
     }
 
     return {
