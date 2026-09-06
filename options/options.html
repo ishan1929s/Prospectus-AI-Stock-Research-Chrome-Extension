@@ -96,6 +96,10 @@
         <label for="api-key-input">API Key</label>
         <input type="password" id="api-key-input" placeholder="Enter your provider API key..." class="text-input" />
         <span class="field-hint">Keys are never sent to our servers. Direct browser-to-provider only.</span>
+        <div style="display: flex; gap: 10px; margin-top: 10px; align-items: center;">
+          <button type="button" id="btn-test-connection" class="btn-secondary">Test Connection</button>
+          <span id="test-status-msg" style="align-self: center; font-size: 13px;"></span>
+        </div>
       </div>
 
       <div class="form-group" id="group-custom-endpoint" style="display: none;">
@@ -167,11 +171,6 @@
         <label for="temp-slider">Temperature: <span id="temp-val">0.2</span></label>
         <input type="range" id="temp-slider" min="0" max="1" step="0.05" value="0.2" class="range-slider" />
         <span class="field-hint">Lower temperature provides more factual, conservative financial extractions.</span>
-      </div>
-
-      <div style="display: flex; gap: 10px; margin-top: 10px;">
-        <button id="btn-test-connection" class="btn-secondary">Test Connection</button>
-        <span id="test-status-msg" style="align-self: center; font-size: 13px;"></span>
       </div>
     </section>
 

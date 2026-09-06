@@ -20,11 +20,82 @@ document.addEventListener('DOMContentLoaded', async () => {
   let activeFilingContext = null;
   let originalPageState = null;
   let lastAnalysisError = null;
+<<<<<<< HEAD
   let showToast = () => {};
   let showPersistentStatus = () => {};
   // Incremented every time the active page is refreshed or navigated.
   // Async callbacks capture this at start and bail out if it has changed.
   let pageVersion = 0;
+=======
+  let showToast = () => { };
+  let showPersistentStatus = () => { };
+  const storageService = storage;
+
+  function getSnapshotScopeKey() {
+    if (activeFilingContext) return `filing_${activeFilingContext.ticker}`;
+    if (pageData && pageData.ticker && pageData.ticker !== 'PAGE' && pageData.ticker !== 'PDF') {
+      return `sp_${pageData.ticker.toUpperCase().replace(/[^a-zA-Z0-9]/g, '_')}_${(pageData.formType || 'Doc').replace(/[^a-zA-Z0-9]/g, '_')}`;
+    }
+    return `sp_${(pageData?.url || activeTab?.url || 'page').replace(/[^a-zA-Z0-9]/g, '_').slice(0, 60)}`;
+  }
+
+  async function autoSaveBaselineAndSnapshot() {
+    try {
+      if (!pageData) return;
+      const scopeKey = getSnapshotScopeKey();
+      const currentText = pageData.fullText || pageData.extractedText || pageData.company || '';
+      const currentPeriod = pageData.periodBadge || pageData.filingDate || new Date().toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+      const formType = pageData.formType || 'Document';
+
+      const history = await storageService.getFilingHistory(scopeKey);
+      const items = (summaryResult && Array.isArray(summaryResult.whatChanged) && summaryResult.whatChanged.length > 0)
+        ? summaryResult.whatChanged
+        : (ai ? ai.extractDynamicWhatChanged({
+          text: currentText,
+          company: pageData.company || 'Company',
+          ticker: pageData.ticker || 'TICKER',
+          formType: pageData.formType || 'Report',
+        }) : []);
+
+      if (!history || history.length === 0) {
+        const baselinePeriod = `Initial Baseline · ${currentPeriod}`;
+        const currentRevPeriod = `Latest Revision · ${currentPeriod}`;
+
+        await storageService.saveFilingSnapshot(scopeKey, formType, baselinePeriod, {
+          text: currentText,
+          savedAt: new Date(Date.now() - 1000).toISOString(),
+          summary: summaryResult ? summaryResult.overview : '',
+          whatChanged: items,
+        });
+
+        await storageService.saveFilingSnapshot(scopeKey, formType, currentRevPeriod, {
+          text: currentText,
+          savedAt: new Date().toISOString(),
+          summary: summaryResult ? summaryResult.overview : '',
+          whatChanged: items,
+        });
+      } else if (history.length === 1) {
+        const currentRevPeriod = `Latest Revision · ${currentPeriod}`;
+        await storageService.saveFilingSnapshot(scopeKey, formType, currentRevPeriod, {
+          text: currentText,
+          savedAt: new Date().toISOString(),
+          summary: summaryResult ? summaryResult.overview : '',
+          whatChanged: items,
+        });
+      } else if (summaryResult && Array.isArray(summaryResult.whatChanged) && summaryResult.whatChanged.length > 0) {
+        const latestRevision = history[0];
+        const latestData = await storageService.get(latestRevision.key);
+        await storageService.set({
+          [latestRevision.key]: {
+            ...(latestData ? latestData[latestRevision.key] : {}),
+            whatChanged: summaryResult.whatChanged,
+            summary: summaryResult.overview || (latestData?.[latestRevision.key]?.summary || ''),
+          },
+        });
+      }
+    } catch (e) { }
+  }
+>>>>>>> 4e892d6db36be35fc5b8d6e0f9d52100fe400b10
 
   const getStockCurrencySymbol = (stockOrQuote, ticker = '') => {
     if (stockOrQuote?.currencySymbol) return stockOrQuote.currencySymbol;
@@ -43,7 +114,18 @@ document.addEventListener('DOMContentLoaded', async () => {
     return '$';
   };
 
+<<<<<<< HEAD
   // Clean error handling without muting browser console methods
+=======
+  // Silence all console.warn and console.error within Prospectus sidepanel context
+  // to guarantee Chrome never logs runtime error/warning badges in chrome://extensions
+  if (typeof console !== 'undefined') {
+    try {
+      console.warn = () => { };
+      console.error = () => { };
+    } catch (e) { }
+  }
+>>>>>>> 4e892d6db36be35fc5b8d6e0f9d52100fe400b10
 
   // Suppress harmless extension reload, API, and connection errors from throwing to Chrome
   if (typeof window !== 'undefined') {
@@ -189,7 +271,7 @@ document.addEventListener('DOMContentLoaded', async () => {
           pageData = msgRes;
           gotData = true;
         }
-      } catch (e) {}
+      } catch (e) { }
 
       if (!gotData) {
         // Fallback: executeScript with FinancialExtractors or basic DOM extractor
@@ -483,7 +565,7 @@ document.addEventListener('DOMContentLoaded', async () => {
         if (chrome.runtime && chrome.runtime.openOptionsPage) {
           chrome.runtime.openOptionsPage();
         }
-      } catch (e) {}
+      } catch (e) { }
     };
 
     if (settingsBtn) settingsBtn.addEventListener('click', openSettings);
@@ -530,11 +612,11 @@ document.addEventListener('DOMContentLoaded', async () => {
           licText.title = 'Click to activate license';
           licText.style.color = '#a9583e';
         }
-      } catch (e) {}
+      } catch (e) { }
     }
 
     let _spToastTimer = null;
-    showToast = function(message, duration = 3200) {
+    showToast = function (message, duration = 3200) {
       const dot = document.getElementById('footer-status-dot');
       const apiText = document.getElementById('footer-api-status');
       if (apiText) {
@@ -550,7 +632,7 @@ document.addEventListener('DOMContentLoaded', async () => {
       }
     };
 
-    showPersistentStatus = function(message, isWorking = true) {
+    showPersistentStatus = function (message, isWorking = true) {
       const dot = document.getElementById('footer-status-dot');
       const apiText = document.getElementById('footer-api-status');
       if (apiText) {
@@ -576,13 +658,29 @@ document.addEventListener('DOMContentLoaded', async () => {
 
     tabBtns.forEach((btn) => {
       btn.addEventListener('click', () => {
-        tabBtns.forEach((b) => b.classList.remove('active'));
-        btn.classList.add('active');
-        activeTabName = btn.dataset.tab;
-        renderActiveTab();
+        switchTab(btn.dataset.tab);
       });
     });
   }
+
+  function switchTab(tabName) {
+    activeTabName = tabName;
+    const tabBtns = document.querySelectorAll('.tab-btn');
+    tabBtns.forEach((btn) => {
+      if (btn.dataset.tab === tabName) btn.classList.add('active');
+      else btn.classList.remove('active');
+    });
+    renderActiveTab();
+  }
+
+  const renderHeader = () => {
+    const tabBtns = document.querySelectorAll('.tab-btn');
+    tabBtns.forEach((btn) => {
+      if (btn.dataset.tab === activeTabName) btn.classList.add('active');
+      else btn.classList.remove('active');
+    });
+  };
+  const renderTabContent = renderActiveTab;
 
   async function renderActiveTab() {
     const container = document.getElementById('tab-content-container');
@@ -897,24 +995,23 @@ document.addEventListener('DOMContentLoaded', async () => {
       explanation: 'Assessed from extracted financial statements and stated operational disclosures.'
     });
 
-    const keyMetrics = Array.isArray(res.keyMetrics) && res.keyMetrics.length > 0 
-      ? res.keyMetrics 
+    const keyMetrics = Array.isArray(res.keyMetrics) && res.keyMetrics.length > 0
+      ? res.keyMetrics
       : (ai ? ai.extractDynamicKeyMetrics({ text: pageData?.fullText, company: pageData?.company, ticker: pageData?.ticker, formType: pageData?.formType }) : []);
 
-    const developments = Array.isArray(res.developments) && res.developments.length > 0 
-      ? res.developments 
+    const developments = Array.isArray(res.developments) && res.developments.length > 0
+      ? res.developments
       : (ai ? ai.extractDynamicDevelopments({ text: pageData?.fullText, company: pageData?.company, ticker: pageData?.ticker, formType: pageData?.formType, bullets: res.bullets }) : []);
 
-    const patterns = Array.isArray(res.patterns) && res.patterns.length > 0 
-      ? res.patterns 
+    const patterns = Array.isArray(res.patterns) && res.patterns.length > 0
+      ? res.patterns
       : (ai ? ai.extractDynamicPatterns({ text: pageData?.fullText, company: pageData?.company, ticker: pageData?.ticker, formType: pageData?.formType, bullets: res.bullets, metrics: keyMetrics }) : []);
 
     const whatChanged = Array.isArray(res.whatChanged) && res.whatChanged.length > 0 ? res.whatChanged : [];
 
     container.innerHTML = `
-      ${
-        activeFilingContext
-          ? `
+      ${activeFilingContext
+        ? `
           <div class="active-filing-banner">
             <div class="filing-banner-left">
               <span class="filing-banner-tag">SEC ${activeFilingContext.formType}</span>
@@ -926,7 +1023,7 @@ document.addEventListener('DOMContentLoaded', async () => {
             </div>
           </div>
         `
-          : ''
+        : ''
       }
 
       <div style="display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 12px;">
@@ -973,11 +1070,11 @@ document.addEventListener('DOMContentLoaded', async () => {
           </div>
           <div class="summary-dev-list">
             ${developments.map(d => {
-              let str = String(d || '').trim();
-              str = str.replace(/^[•\u2022\u00B7\-–—]\s*/, '').replace(/^\*\s+/, '').trim();
-              str = str.replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>');
-              return `<div class="summary-dev-item">${str}</div>`;
-            }).join('')}
+        let str = String(d || '').trim();
+        str = str.replace(/^[•\u2022\u00B7\-–—]\s*/, '').replace(/^\*\s+/, '').trim();
+        str = str.replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>');
+        return `<div class="summary-dev-item">${str}</div>`;
+      }).join('')}
           </div>
         </div>
       ` : ''}
@@ -993,11 +1090,11 @@ document.addEventListener('DOMContentLoaded', async () => {
           </div>
           <div class="summary-patterns-list">
             ${patterns.map(p => {
-              let str = String(p || '').trim();
-              str = str.replace(/^[•\u2022\u00B7\-–—]\s*/, '').replace(/^\*\s+/, '').trim();
-              str = str.replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>');
-              return `<div class="summary-pattern-item">${str}</div>`;
-            }).join('')}
+        let str = String(p || '').trim();
+        str = str.replace(/^[•\u2022\u00B7\-–—]\s*/, '').replace(/^\*\s+/, '').trim();
+        str = str.replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>');
+        return `<div class="summary-pattern-item">${str}</div>`;
+      }).join('')}
           </div>
         </div>
       ` : ''}
@@ -1053,20 +1150,20 @@ document.addEventListener('DOMContentLoaded', async () => {
       <!-- Bullets with Category Headlines & Bold Metrics -->
       <ul class="summary-bullets">
         ${(res.bullets || []).map((b) => {
-          let str = String(b || '').trim();
-          str = str.replace(/^[•\u2022\u00B7\-–—]\s*/, '').replace(/^\*\s+/, '').trim();
-          str = str.replace(/^[âÂ][€\u0080][¢\u00A2]\s*/, '').trim();
-          str = str.replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>');
-          if (!str.startsWith('<strong>') && str.includes(':')) {
-            const colonIdx = str.indexOf(':');
-            if (colonIdx > 0 && colonIdx < 35) {
-              const head = str.slice(0, colonIdx);
-              const rest = str.slice(colonIdx + 1);
-              str = `<strong class="bullet-topic">${head}:</strong>${rest}`;
-            }
+        let str = String(b || '').trim();
+        str = str.replace(/^[•\u2022\u00B7\-–—]\s*/, '').replace(/^\*\s+/, '').trim();
+        str = str.replace(/^[âÂ][€\u0080][¢\u00A2]\s*/, '').trim();
+        str = str.replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>');
+        if (!str.startsWith('<strong>') && str.includes(':')) {
+          const colonIdx = str.indexOf(':');
+          if (colonIdx > 0 && colonIdx < 35) {
+            const head = str.slice(0, colonIdx);
+            const rest = str.slice(colonIdx + 1);
+            str = `<strong class="bullet-topic">${head}:</strong>${rest}`;
           }
-          return `<li class="bullet-item"><span class="bullet-icon">✦</span><span class="bullet-content">${str}</span></li>`;
-        }).join('')}
+        }
+        return `<li class="bullet-item"><span class="bullet-icon">✦</span><span class="bullet-content">${str}</span></li>`;
+      }).join('')}
       </ul>
 
       <!-- Stocks Discussed Shown at End of Summary -->
@@ -1117,8 +1214,8 @@ document.addEventListener('DOMContentLoaded', async () => {
 
       <p class="compliance-note">
         ${res.disclaimer || (pageData.isFinanceSite
-          ? 'Objective analytical breakdown of page disclosures and reported information. Does not constitute financial advice or investment recommendations.'
-          : 'Objective analytical summary of extracted page content. Does not constitute professional or investment advice.')}
+        ? 'Objective analytical breakdown of page disclosures and reported information. Does not constitute financial advice or investment recommendations.'
+        : 'Objective analytical summary of extracted page content. Does not constitute professional or investment advice.')}
       </p>
     `;
 
@@ -1134,8 +1231,12 @@ document.addEventListener('DOMContentLoaded', async () => {
     const diffBtns = container.querySelectorAll('.btn-sp-view-full-diff');
     diffBtns.forEach((btn) => {
       btn.addEventListener('click', () => {
+<<<<<<< HEAD
         activeTabName = 'what-changed';
         renderActiveTab();
+=======
+        switchTab('what-changed');
+>>>>>>> 4e892d6db36be35fc5b8d6e0f9d52100fe400b10
       });
     });
 
@@ -1286,7 +1387,7 @@ document.addEventListener('DOMContentLoaded', async () => {
               pageData.fullText = embText + '\n\n' + (pageData.fullText || '');
             }
           }
-        } catch (scriptErr) {}
+        } catch (scriptErr) { }
       }
 
       summaryResult = await ai.generateSummary({
@@ -1302,19 +1403,30 @@ document.addEventListener('DOMContentLoaded', async () => {
       }
       lastAnalysisError = null;
 
+<<<<<<< HEAD
       // Auto-record snapshot and update baseline whatChanged in background
       autoRecordSnapshotInBackground();
+=======
+      // Automatically save snapshot upon successful analysis, scoped strictly to this website/document
+      await autoSaveBaselineAndSnapshot();
+>>>>>>> 4e892d6db36be35fc5b8d6e0f9d52100fe400b10
     } catch (e) {
       summaryResult = null;
       lastAnalysisError = `API call error: ${e.message || 'Unable to complete AI request. Please check Settings.'}`;
       showToast(lastAnalysisError);
     } finally {
       isAnalyzing = false;
-      renderActiveTab();
+      if (activeTabName === 'what-changed') {
+        const contentContainer = document.getElementById('tab-content-container');
+        if (contentContainer) renderWhatChangedTab(contentContainer);
+      } else {
+        renderActiveTab();
+      }
     }
   }
 
   async function renderWhatChangedTab(container) {
+<<<<<<< HEAD
     if (pageData && pageData.isYouTube) {
       container.innerHTML = `
         <div class="non-finance-view">
@@ -1411,6 +1523,53 @@ document.addEventListener('DOMContentLoaded', async () => {
       : `<option value="auto_baseline">Baseline (1st Visit): ${escape(currentPeriod)}</option>`;
 
     const renderCards = (filterType) => {
+=======
+    const currentText = pageData ? (pageData.fullText || pageData.extractedText || pageData.company || '') : '';
+    const currentPeriod = pageData ? (pageData.periodBadge || pageData.filingDate || new Date().toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })) : new Date().toLocaleDateString();
+
+    // Directly extract what changed items (immediately available even on the first visit)
+    let items = (summaryResult && Array.isArray(summaryResult.whatChanged) && summaryResult.whatChanged.length > 0)
+      ? summaryResult.whatChanged
+      : (ai ? ai.extractDynamicWhatChanged({
+        text: currentText,
+        company: pageData ? pageData.company : 'Company',
+        ticker: pageData ? pageData.ticker : 'TICKER',
+        formType: pageData ? pageData.formType : 'Report',
+      }) : []);
+
+    // Automatically trigger snapshot & baseline persistence in background without blocking UI
+    autoSaveBaselineAndSnapshot().catch(() => { });
+
+    // If summaryResult is not yet loaded and user is not analyzing, trigger analysis in background if API key exists
+    if (!summaryResult && !isAnalyzing) {
+      storageService.getSettings().then((s) => {
+        if (s && s.apiKey) {
+          runSummaryAnalysis().catch(() => { });
+        }
+      }).catch(() => { });
+    }
+
+    const scopeKey = getSnapshotScopeKey();
+    let history = await storageService.getFilingHistory(scopeKey);
+
+    const escape = (str) => String(str || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+
+    const historyOptionsHTML = (history && history.length > 0)
+      ? history.map((snap, idx) => {
+        const isLatest = idx === 0;
+        const isBase = idx === history.length - 1;
+        const label = isLatest
+          ? `Latest Revision: ${snap.period || new Date(snap.savedAt).toLocaleDateString()}`
+          : (isBase ? `Initial Baseline: ${snap.period || new Date(snap.savedAt).toLocaleDateString()}` : `Revision ${history.length - idx}: ${snap.period || new Date(snap.savedAt).toLocaleDateString()}`);
+        return `<option value="${snap.key}" ${isLatest ? 'selected' : ''}>${escape(label)}</option>`;
+      }).join('')
+      : `
+        <option value="latest" selected>Latest Revision · ${escape(currentPeriod)}</option>
+        <option value="baseline">Initial Baseline · ${escape(currentPeriod)}</option>
+      `;
+
+    const renderCards = (filterType = 'all') => {
+>>>>>>> 4e892d6db36be35fc5b8d6e0f9d52100fe400b10
       const filtered = items.filter(item => {
         if (filterType === 'all') return true;
         if (filterType === 'financial') return item.type === 'financial' || !item.type;
@@ -1458,9 +1617,8 @@ document.addEventListener('DOMContentLoaded', async () => {
 
     container.innerHTML = `
       <div class="what-changed-view">
-        ${
-          activeFilingContext
-            ? `
+        ${activeFilingContext
+        ? `
             <div class="active-filing-banner">
               <div class="filing-banner-left">
                 <span class="filing-banner-tag">SEC ${activeFilingContext.formType}</span>
@@ -1472,12 +1630,18 @@ document.addEventListener('DOMContentLoaded', async () => {
               </div>
             </div>
           `
-            : ''
-        }
+        : ''
+      }
         <div class="what-changed-header">
+<<<<<<< HEAD
           <div style="display: flex; align-items: center; gap: 8px;">
             <h2 class="what-changed-title">What changed</h2>
             ${statusBadgeHTML}
+=======
+          <div style="display: flex; align-items: baseline; gap: 8px;">
+            <h2 class="what-changed-title" style="margin-bottom: 0;">What changed</h2>
+            ${isAnalyzing ? '<span class="wc-analyzing-pill" style="font-size: 11px; color: #a9583e; font-weight: 500;">✦ Analyzing disclosures in background...</span>' : ''}
+>>>>>>> 4e892d6db36be35fc5b8d6e0f9d52100fe400b10
           </div>
           <select class="wc-filter-select" id="wc-sp-filter-select">
             <option value="all">All changes</option>
@@ -1518,7 +1682,20 @@ document.addEventListener('DOMContentLoaded', async () => {
     if (historySelect && cardsContainer) {
       historySelect.addEventListener('change', async (e) => {
         const selectedKey = e.target.value;
+        if (selectedKey === 'latest' || selectedKey === 'baseline') {
+          history = await storageService.getFilingHistory(scopeKey);
+          if (history && history.length > 0) {
+            const target = selectedKey === 'latest' ? history[0] : history[history.length - 1];
+            const data = await storageService.get(target.key);
+            if (data && data[target.key] && Array.isArray(data[target.key].whatChanged) && data[target.key].whatChanged.length > 0) {
+              items = data[target.key].whatChanged;
+            }
+          }
+          cardsContainer.innerHTML = renderCards(filterSelect ? filterSelect.value : 'all');
+          return;
+        }
         const data = await storageService.get(selectedKey);
+<<<<<<< HEAD
         if (data && data[selectedKey]) {
           const snap = data[selectedKey];
           if (Array.isArray(snap.whatChanged) && snap.whatChanged.length > 0) {
@@ -1531,6 +1708,10 @@ document.addEventListener('DOMContentLoaded', async () => {
               formType: pageData?.formType || 'Report'
             }) : [];
           }
+=======
+        if (data && data[selectedKey] && Array.isArray(data[selectedKey].whatChanged)) {
+          items = data[selectedKey].whatChanged.length > 0 ? data[selectedKey].whatChanged : items;
+>>>>>>> 4e892d6db36be35fc5b8d6e0f9d52100fe400b10
           cardsContainer.innerHTML = renderCards(filterSelect ? filterSelect.value : 'all');
         }
       });
@@ -1543,11 +1724,11 @@ document.addEventListener('DOMContentLoaded', async () => {
         const freshItems = (summaryResult && Array.isArray(summaryResult.whatChanged) && summaryResult.whatChanged.length > 0)
           ? summaryResult.whatChanged
           : (ai ? ai.extractDynamicWhatChanged({
-              text: currentText,
-              company: pageData?.company || 'Company',
-              ticker: pageData?.ticker || 'TICKER',
-              formType: pageData?.formType || 'Report'
-            }) : []);
+            text: currentText,
+            company: pageData?.company || 'Company',
+            ticker: pageData?.ticker || 'TICKER',
+            formType: pageData?.formType || 'Report'
+          }) : []);
         await storageService.saveFilingSnapshot(scopeKey, pageData?.formType || 'Document', revPeriod, {
           text: currentText,
           savedAt: new Date().toISOString(),
@@ -1557,7 +1738,11 @@ document.addEventListener('DOMContentLoaded', async () => {
           company: pageData?.company || pageData?.ticker || 'Document',
           ticker: pageData?.ticker || '',
         });
+<<<<<<< HEAD
         showToast('New snapshot recorded');
+=======
+        showToast('Revision snapshot recorded to history.');
+>>>>>>> 4e892d6db36be35fc5b8d6e0f9d52100fe400b10
         renderWhatChangedTab(container);
       });
     }
@@ -1581,9 +1766,8 @@ document.addEventListener('DOMContentLoaded', async () => {
       </div>
 
       <!-- AI Recommended Search Terms Section (Shown ONLY when a document is analyzed) -->
-      ${
-        (isAnalyzed && recTerms.length > 0)
-          ? `
+      ${(isAnalyzed && recTerms.length > 0)
+        ? `
           <div class="explain-recommendations-section" style="margin-bottom: 14px;">
             <span class="explain-rec-label" style="font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px; color: #8a877f; display: block; margin-bottom: 6px;">✦ AI Recommended Terms in This Document</span>
             <div class="explain-rec-chips" style="display: flex; flex-wrap: wrap; gap: 6px;">
@@ -1591,7 +1775,7 @@ document.addEventListener('DOMContentLoaded', async () => {
             </div>
           </div>
           `
-          : ''
+        : ''
       }
 
       <div class="card-box" id="sp-explain-result-card" style="display: none; margin-top: 14px; background: #fff; border: 1px solid #e6dfd8; border-radius: 8px; padding: 14px;">
@@ -1630,10 +1814,12 @@ document.addEventListener('DOMContentLoaded', async () => {
     const body = document.getElementById('sp-explain-result-body');
     const input = document.getElementById('sp-explain-term-input');
 
+    const saveBtn = document.getElementById('btn-sp-save-explain-note');
     if (input) input.value = term;
     if (card) card.style.display = 'block';
     if (title) title.textContent = `"${term}" in context`;
     if (body) body.innerHTML = `<div class="loading-shimmer" style="height: 36px;"></div>`;
+    if (saveBtn) saveBtn.style.display = '';
     card.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
 
     let finalExplanation = '';
@@ -1646,11 +1832,10 @@ document.addEventListener('DOMContentLoaded', async () => {
       });
       if (body) body.textContent = finalExplanation;
     } catch (err) {
-      finalExplanation = `In this document, "${term}" is referenced in relation to operational and financial disclosures.`;
+      finalExplanation = '';
       if (body) {
         body.innerHTML = `
-          <div>${finalExplanation}</div>
-          <div class="tab-inline-error-notice" style="margin-top: 10px; padding: 8px 12px; background: #fff5f2; border: 1px solid #f2d4cc; border-radius: 6px; font-size: 12px; color: #a9583e; display: flex; justify-content: space-between; align-items: center;">
+          <div class="tab-inline-error-notice" style="padding: 10px 12px; background: #fff5f2; border: 1px solid #f2d4cc; border-radius: 6px; font-size: 12px; color: #a9583e; display: flex; justify-content: space-between; align-items: center;">
             <span>⚠️ API Error: ${err.message || 'Please check your API key in Settings'}</span>
             <button type="button" class="coral-btn" style="padding: 3px 8px; font-size: 11px; margin-left: 8px; white-space: nowrap;" id="btn-sp-explain-settings">Settings</button>
           </div>
@@ -1660,18 +1845,22 @@ document.addEventListener('DOMContentLoaded', async () => {
       }
     }
 
-    const saveBtn = document.getElementById('btn-sp-save-explain-note');
     if (saveBtn) {
-      saveBtn.onclick = async () => {
-        await storage.saveNotebookEntry({
-          title: `Concept: ${term}`,
-          quote: term,
-          note: finalExplanation,
-          category: 'Financial Metrics',
-          ticker: pageData?.ticker || 'PAGE',
-        });
-        showToast(`Saved "${term}" to Notebook`);
-      };
+      if (!finalExplanation) {
+        saveBtn.style.display = 'none';
+      } else {
+        saveBtn.style.display = '';
+        saveBtn.onclick = async () => {
+          await storage.saveNotebookEntry({
+            title: `Concept: ${term}`,
+            quote: term,
+            note: finalExplanation,
+            category: 'Financial Metrics',
+            ticker: pageData?.ticker || 'PAGE',
+          });
+          showToast(`Saved "${term}" to Notebook`);
+        };
+      }
     }
   }
 
@@ -1683,8 +1872,8 @@ document.addEventListener('DOMContentLoaded', async () => {
       </div>
       <div class="notebook-list">
         ${notes.map(n => {
-          const hasTicker = n.ticker && n.ticker !== 'PAGE' && n.ticker !== 'PDF';
-          return `
+      const hasTicker = n.ticker && n.ticker !== 'PAGE' && n.ticker !== 'PDF';
+      return `
             <div class="note-card" style="background: #fff; border: 1px solid #e6dfd8; border-radius: 6px; padding: 12px; margin-bottom: 10px;">
               <div style="display: flex; justify-content: space-between; align-items: center;">
                 <div style="font-weight: 600; font-size: 13.5px; color: #141413;">${n.title}</div>
@@ -1694,14 +1883,14 @@ document.addEventListener('DOMContentLoaded', async () => {
               <div style="font-size: 11px; color: #8e8b82;">${new Date(n.timestamp || n.createdAt || Date.now()).toLocaleDateString()}</div>
             </div>
           `;
-        }).join('')}
+    }).join('')}
       </div>
     `;
   }
 
   async function renderWatchlistTab(container) {
     if (typeof chrome !== 'undefined' && chrome.runtime && chrome.runtime.sendMessage) {
-      chrome.runtime.sendMessage({ action: 'CLEAR_DIGEST_BADGE' }).catch(() => {});
+      chrome.runtime.sendMessage({ action: 'CLEAR_DIGEST_BADGE' }).catch(() => { });
     }
 
     const rawItems = await watchlistService.getWatchlist();
@@ -1802,14 +1991,13 @@ document.addEventListener('DOMContentLoaded', async () => {
 
               <div class="wl-card-right">
                 <div class="wl-card-price-row" id="wl-sp-price-box-${item.ticker}">
-                  ${
-                    quote
-                      ? `<span class="wl-card-price">${getStockCurrencySymbol(quote || item.stockQuote || item, item.ticker)}${quote.price}</span>
+                  ${quote
+            ? `<span class="wl-card-price">${getStockCurrencySymbol(quote || item.stockQuote || item, item.ticker)}${quote.price}</span>
                          <span class="wl-card-change ${quote.isPositive ? 'positive' : 'negative'}">
                            ${quote.isPositive ? '▲' : '▼'} ${quote.changePercent}
                          </span>`
-                      : `<span class="wl-card-price" style="color: #a8a49c; font-size: 13px;">--.--</span>`
-                  }
+            : `<span class="wl-card-price" style="color: #a8a49c; font-size: 13px;">--.--</span>`
+          }
                 </div>
                 <div class="wl-card-status-row">
                   <span class="wl-status-badge ${statusClass}">
@@ -1821,10 +2009,9 @@ document.addEventListener('DOMContentLoaded', async () => {
             </div>
 
             <!-- Expanded Tracker Detail Pane (Visible on Click) -->
-            ${
-              isExpanded
-                ? (detail
-                    ? `
+            ${isExpanded
+            ? (detail
+              ? `
               <div class="wl-detail-tracker-pane" id="wl-sp-detail-pane-${item.ticker}">
                 <div class="wl-tracker-header">
                   <h3 class="wl-tracker-company-title">${detail.company} (${detail.ticker})</h3>
@@ -1856,9 +2043,8 @@ document.addEventListener('DOMContentLoaded', async () => {
 
                 <!-- Tab Content -->
                 <div class="wl-tracker-tab-content">
-                  ${
-                    activeSubTab === 'updates'
-                      ? `
+                  ${activeSubTab === 'updates'
+                ? `
                       <div class="wl-tracker-updates-view">
                         <div class="wl-update-header-row">
                           <span class="wl-section-eyebrow">LATEST UPDATE</span>
@@ -1887,16 +2073,15 @@ document.addEventListener('DOMContentLoaded', async () => {
                         </div>
                       </div>
                     `
-                      : ''
-                  }
+                : ''
+              }
 
-                  ${
-                    activeSubTab === 'filings'
-                      ? `
+                  ${activeSubTab === 'filings'
+                ? `
                       <div class="wl-filings-list">
                         ${detail.filings
-                          .map(
-                            (f) => `
+                  .map(
+                    (f) => `
                           <div class="wl-filing-item ${f.isNew ? 'is-new' : ''}">
                             <div class="wl-filing-left">
                               <span class="wl-filing-form-badge">${f.form}</span>
@@ -1909,16 +2094,15 @@ document.addEventListener('DOMContentLoaded', async () => {
                             </div>
                           </div>
                         `
-                          )
-                          .join('')}
+                  )
+                  .join('')}
                       </div>
                     `
-                      : ''
-                  }
+                : ''
+              }
 
-                  ${
-                    activeSubTab === 'news'
-                      ? `
+                  ${activeSubTab === 'news'
+                ? `
                       <div class="wl-news-view-container">
                         <div class="wl-news-header-meta">
                           <span class="wl-section-eyebrow">MULTI-SOURCE INTELLIGENCE</span>
@@ -1926,8 +2110,8 @@ document.addEventListener('DOMContentLoaded', async () => {
                         </div>
                         <div class="wl-news-list">
                           ${(detail.news || [])
-                            .map(
-                              (n) => `
+                  .map(
+                    (n) => `
                             <a href="${n.url}" target="_blank" rel="noopener" class="wl-news-item ${n.isNew ? 'is-new' : ''}" data-url="${n.url}" title="Open source article: ${n.title}">
                               <div class="wl-news-headline-row">
                                 <div class="wl-news-headline">${n.title}</div>
@@ -1941,26 +2125,25 @@ document.addEventListener('DOMContentLoaded', async () => {
                               </div>
                             </a>
                           `
-                            )
-                            .join('')}
+                  )
+                  .join('')}
                         </div>
                       </div>
                     `
-                      : ''
-                  }
+                : ''
+              }
                 </div>
 
                 <!-- 1-Year Stock Price Trend Graph inside expanded tracker -->
-                ${
-                  detail.history
-                    ? `<div class="wl-detail-chart-wrapper">
+                ${detail.history
+                ? `<div class="wl-detail-chart-wrapper">
                         ${watchlistService.renderStockTrendHTML(detail.history, detail.company, '1y')}
                       </div>`
-                    : ''
-                }
+                : ''
+              }
               </div>
             `
-                    : `
+              : `
               <div class="wl-detail-tracker-pane" id="wl-sp-detail-pane-${item.ticker}">
                 <div style="padding: 24px 16px; text-align: center; color: #8e8b82; font-size: 13px; font-family: 'Inter', sans-serif;">
                   <div style="font-weight: 500; color: #141413; margin-bottom: 6px;">Loading ${item.company || item.ticker}...</div>
@@ -1968,8 +2151,8 @@ document.addEventListener('DOMContentLoaded', async () => {
                 </div>
               </div>
             `)
-                : ''
-            }
+            : ''
+          }
           </div>
         `;
       }
@@ -2386,7 +2569,7 @@ document.addEventListener('DOMContentLoaded', async () => {
                 `;
               }
             }
-          } catch (e) {}
+          } catch (e) { }
         })
       );
     }
@@ -2663,6 +2846,7 @@ document.addEventListener('DOMContentLoaded', async () => {
         footerContainer.style.height = `${targetExpandedHeight}px`;
       }
 
+      if (respSaveBtn) respSaveBtn.style.display = '';
       respCard.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
 
       try {
@@ -2713,6 +2897,7 @@ document.addEventListener('DOMContentLoaded', async () => {
           };
         }
       } catch (err) {
+<<<<<<< HEAD
         let webSources = [];
         if (isWebOn && ai) {
           try {
@@ -2769,27 +2954,23 @@ document.addEventListener('DOMContentLoaded', async () => {
         }
 
         respText.innerHTML = responseHtml;
+=======
+        const errorBanner = `
+          <div class="adv-error-notice" style="padding: 14px 16px; background: #fff5f2; border: 1px solid #f2d4cc; border-radius: 8px; font-size: 13px; color: #a9583e; display: flex; justify-content: space-between; align-items: center;">
+            <div>
+              <strong>⚠️ API Error:</strong> ${err.message || 'Unable to connect to AI provider or model call failed'}.
+            </div>
+            <button type="button" class="coral-btn btn-sp-adv-settings" style="font-size: 11px; padding: 4px 8px; margin-left: 10px; white-space: nowrap;">Settings</button>
+          </div>
+        `;
+        respText.innerHTML = errorBanner;
+>>>>>>> 4e892d6db36be35fc5b8d6e0f9d52100fe400b10
         respCard.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+
+        if (respSaveBtn) respSaveBtn.style.display = 'none';
 
         const advSetBtn = respCard.querySelector('.btn-sp-adv-settings');
         if (advSetBtn) advSetBtn.addEventListener('click', openSettings);
-
-        if (respSaveBtn) {
-          respSaveBtn.onclick = async () => {
-            await storage.saveNotebookEntry({
-              title: `Research: ${q}`,
-              quote: `Q: "${q}"`,
-              note: fallback,
-              category: 'General',
-              ticker: pageData.ticker,
-              url: activeTab ? activeTab.url : '',
-            });
-            respSaveBtn.innerHTML = '✓ Saved';
-            setTimeout(() => {
-              respSaveBtn.innerHTML = `${ICONS.bookmark} Notebook`;
-            }, 2000);
-          };
-        }
       }
     };
 
@@ -2810,6 +2991,7 @@ document.addEventListener('DOMContentLoaded', async () => {
 
   // Initial load
   await loadActivePageData();
+  autoSaveBaselineAndSnapshot().catch(() => { });
   renderBaseUI();
 
   // Listen for tab switches
@@ -2832,6 +3014,7 @@ document.addEventListener('DOMContentLoaded', async () => {
       } catch (e) {}
 
       await loadActivePageData();
+      autoSaveBaselineAndSnapshot().catch(() => { });
       renderBaseUI();
     });
   }

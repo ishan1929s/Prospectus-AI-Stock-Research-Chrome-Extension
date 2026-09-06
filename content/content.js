@@ -9,7 +9,7 @@
     try {
       if (typeof document === 'undefined') return false;
       if (!document.documentElement) return false;
-      
+
       const rootTag = (document.documentElement.nodeName || '').toLowerCase();
       if (rootTag !== 'html' && rootTag !== 'body') return false;
 
@@ -45,7 +45,18 @@
   if (window.__prospectus_injected) return;
   window.__prospectus_injected = true;
 
+<<<<<<< HEAD
   // Clean error handling without muting browser console methods
+=======
+  // Silence all console.warn and console.error within Prospectus extension context
+  // to guarantee Chrome never logs runtime error/warning badges in chrome://extensions
+  if (typeof console !== 'undefined') {
+    try {
+      console.warn = () => { };
+      console.error = () => { };
+    } catch (e) { }
+  }
+>>>>>>> 4e892d6db36be35fc5b8d6e0f9d52100fe400b10
 
   // Suppress harmless extension reload, API, and connection errors from throwing to Chrome
   if (typeof window !== 'undefined') {
@@ -135,6 +146,7 @@
         if (this.hostElement && this.shadowRoot) return;
         this.pageData = FinancialExtractors.extractPageData();
         await this.injectShadowHost();
+        this.autoSaveBaselineAndSnapshot().catch(() => { });
         this.setupSelectionListener();
         this.setupMessageListener();
         this.setupUrlChangeListener();
@@ -372,7 +384,7 @@
               const currentSettings = await this.storage.getSettings();
               currentSettings.dockToggleTopPercent = Math.round(topPercent * 10) / 10;
               await this.storage.saveSettings(currentSettings);
-            } catch (err) {}
+            } catch (err) { }
           } else {
             // Clean click without drag: toggle panel
             this.togglePanel();
@@ -662,6 +674,7 @@
       this.lastAnalysisError = null;
       this.proceedAnyway = false;
       this.updateHeaderWatchlistButton();
+      this.autoSaveBaselineAndSnapshot().catch(() => { });
 
       // Auto-record baseline on 1st visit and snapshot updates in background
       this.autoRecordSnapshotInBackground();
@@ -723,7 +736,7 @@
           licText.title = 'Click to activate license';
           licText.style.color = '#a9583e';
         }
-      } catch (e) {}
+      } catch (e) { }
     }
 
     // ==========================================
@@ -1031,24 +1044,23 @@
         explanation: 'Assessed from extracted financial statements and stated operational disclosures.'
       });
 
-      const keyMetrics = Array.isArray(res.keyMetrics) && res.keyMetrics.length > 0 
-        ? res.keyMetrics 
+      const keyMetrics = Array.isArray(res.keyMetrics) && res.keyMetrics.length > 0
+        ? res.keyMetrics
         : (this.ai ? this.ai.extractDynamicKeyMetrics({ text: this.pageData?.fullText, company: this.pageData?.company, ticker: this.pageData?.ticker, formType: this.pageData?.formType }) : []);
 
-      const developments = Array.isArray(res.developments) && res.developments.length > 0 
-        ? res.developments 
+      const developments = Array.isArray(res.developments) && res.developments.length > 0
+        ? res.developments
         : (this.ai ? this.ai.extractDynamicDevelopments({ text: this.pageData?.fullText, company: this.pageData?.company, ticker: this.pageData?.ticker, formType: this.pageData?.formType, bullets: res.bullets }) : []);
 
-      const patterns = Array.isArray(res.patterns) && res.patterns.length > 0 
-        ? res.patterns 
+      const patterns = Array.isArray(res.patterns) && res.patterns.length > 0
+        ? res.patterns
         : (this.ai ? this.ai.extractDynamicPatterns({ text: this.pageData?.fullText, company: this.pageData?.company, ticker: this.pageData?.ticker, formType: this.pageData?.formType, bullets: res.bullets, metrics: keyMetrics }) : []);
 
       const whatChanged = Array.isArray(res.whatChanged) && res.whatChanged.length > 0 ? res.whatChanged : [];
 
       container.innerHTML = `
-        ${
-          this.activeFilingContext
-            ? `
+        ${this.activeFilingContext
+          ? `
             <div class="active-filing-banner">
               <div class="filing-banner-left">
                 <span class="filing-banner-tag">SEC ${this.activeFilingContext.formType}</span>
@@ -1060,7 +1072,7 @@
               </div>
             </div>
           `
-            : ''
+          : ''
         }
 
         <div style="display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 12px;">
@@ -1108,11 +1120,11 @@
             </div>
             <div class="summary-dev-list">
               ${developments.map(d => {
-                let str = String(d || '').trim();
-                str = str.replace(/^[•\u2022\u00B7\-–—]\s*/, '').replace(/^\*\s+/, '').trim();
-                str = str.replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>');
-                return `<div class="summary-dev-item">${str}</div>`;
-              }).join('')}
+          let str = String(d || '').trim();
+          str = str.replace(/^[•\u2022\u00B7\-–—]\s*/, '').replace(/^\*\s+/, '').trim();
+          str = str.replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>');
+          return `<div class="summary-dev-item">${str}</div>`;
+        }).join('')}
             </div>
           </div>
         ` : ''}
@@ -1128,11 +1140,11 @@
             </div>
             <div class="summary-patterns-list">
               ${patterns.map(p => {
-                let str = String(p || '').trim();
-                str = str.replace(/^[•\u2022\u00B7\-–—]\s*/, '').replace(/^\*\s+/, '').trim();
-                str = str.replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>');
-                return `<div class="summary-pattern-item">${str}</div>`;
-              }).join('')}
+          let str = String(p || '').trim();
+          str = str.replace(/^[•\u2022\u00B7\-–—]\s*/, '').replace(/^\*\s+/, '').trim();
+          str = str.replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>');
+          return `<div class="summary-pattern-item">${str}</div>`;
+        }).join('')}
             </div>
           </div>
         ` : ''}
@@ -1188,20 +1200,20 @@
         <!-- Bullets with Category Headlines & Bold Metrics -->
         <ul class="summary-bullets" id="summary-bullet-list">
           ${(res.bullets || []).map((b) => {
-            let str = String(b || '').trim();
-            str = str.replace(/^[•\u2022\u00B7\-–—]\s*/, '').replace(/^\*\s+/, '').trim();
-            str = str.replace(/^[âÂ][€\u0080][¢\u00A2]\s*/, '').trim();
-            str = str.replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>');
-            if (!str.startsWith('<strong>') && str.includes(':')) {
-              const colonIdx = str.indexOf(':');
-              if (colonIdx > 0 && colonIdx < 35) {
-                const head = str.slice(0, colonIdx);
-                const rest = str.slice(colonIdx + 1);
-                str = `<strong class="bullet-topic">${head}:</strong>${rest}`;
-              }
+          let str = String(b || '').trim();
+          str = str.replace(/^[•\u2022\u00B7\-–—]\s*/, '').replace(/^\*\s+/, '').trim();
+          str = str.replace(/^[âÂ][€\u0080][¢\u00A2]\s*/, '').trim();
+          str = str.replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>');
+          if (!str.startsWith('<strong>') && str.includes(':')) {
+            const colonIdx = str.indexOf(':');
+            if (colonIdx > 0 && colonIdx < 35) {
+              const head = str.slice(0, colonIdx);
+              const rest = str.slice(colonIdx + 1);
+              str = `<strong class="bullet-topic">${head}:</strong>${rest}`;
             }
-            return `<li>${str}</li>`;
-          }).join('')}
+          }
+          return `<li>${str}</li>`;
+        }).join('')}
         </ul>
 
         <!-- Stocks Discussed Shown at End of Summary -->
@@ -1252,8 +1264,8 @@
 
         <p class="compliance-note">
           ${res.disclaimer || (this.pageData.isFinanceSite
-            ? 'Objective analytical breakdown of page disclosures and reported information. Does not constitute financial advice or investment recommendations.'
-            : 'Objective analytical summary of extracted page content. Does not constitute professional or investment advice.')}
+          ? 'Objective analytical breakdown of page disclosures and reported information. Does not constitute financial advice or investment recommendations.'
+          : 'Objective analytical summary of extracted page content. Does not constitute professional or investment advice.')}
         </p>
       `;
 
@@ -1351,6 +1363,63 @@
           aiService: this.ai,
         });
       } catch (e) {}
+    }
+
+    async autoSaveBaselineAndSnapshot() {
+      try {
+        if (!this.pageData) return;
+        const scopeKey = this.getSnapshotScopeKey();
+        const currentText = this.pageData.fullText || this.pageData.riskFactorsText || this.pageData.extractedText || this.pageData.company || '';
+        const currentPeriod = this.pageData.periodBadge || this.pageData.filingDate || new Date().toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+        const formType = this.pageData.formType || 'Document';
+
+        const history = await this.storage.getFilingHistory(scopeKey);
+        const items = (this.summaryResult && Array.isArray(this.summaryResult.whatChanged) && this.summaryResult.whatChanged.length > 0)
+          ? this.summaryResult.whatChanged
+          : (this.ai ? this.ai.extractDynamicWhatChanged({
+            text: currentText,
+            company: this.pageData.company || 'Company',
+            ticker: this.pageData.ticker || 'TICKER',
+            formType: this.pageData.formType || 'Report',
+          }) : []);
+
+        if (!history || history.length === 0) {
+          const baselinePeriod = `Initial Baseline · ${currentPeriod}`;
+          const currentRevPeriod = `Latest Revision · ${currentPeriod}`;
+
+          await this.storage.saveFilingSnapshot(scopeKey, formType, baselinePeriod, {
+            text: currentText,
+            savedAt: new Date(Date.now() - 1000).toISOString(),
+            summary: this.summaryResult ? this.summaryResult.overview : '',
+            whatChanged: items,
+          });
+
+          await this.storage.saveFilingSnapshot(scopeKey, formType, currentRevPeriod, {
+            text: currentText,
+            savedAt: new Date().toISOString(),
+            summary: this.summaryResult ? this.summaryResult.overview : '',
+            whatChanged: items,
+          });
+        } else if (history.length === 1) {
+          const currentRevPeriod = `Latest Revision · ${currentPeriod}`;
+          await this.storage.saveFilingSnapshot(scopeKey, formType, currentRevPeriod, {
+            text: currentText,
+            savedAt: new Date().toISOString(),
+            summary: this.summaryResult ? this.summaryResult.overview : '',
+            whatChanged: items,
+          });
+        } else if (this.summaryResult && Array.isArray(this.summaryResult.whatChanged) && this.summaryResult.whatChanged.length > 0) {
+          const latestRevision = history[0];
+          const latestData = await this.storage.get(latestRevision.key);
+          await this.storage.set({
+            [latestRevision.key]: {
+              ...(latestData ? latestData[latestRevision.key] : {}),
+              whatChanged: this.summaryResult.whatChanged,
+              summary: this.summaryResult.overview || (latestData?.[latestRevision.key]?.summary || ''),
+            },
+          });
+        }
+      } catch (e) { }
     }
 
     async viewFilingSummary(ticker) {
@@ -1517,13 +1586,18 @@
         this.lastAnalysisError = null;
         this.renderAdvancedFooter(res.suggestedQueries || this.ai.extractDynamicFallbackQueries(this.pageData));
 
+<<<<<<< HEAD
         // Auto-record snapshot and update baseline whatChanged in background
         this.autoRecordSnapshotInBackground();
+=======
+        // Automatically save snapshot upon successful analysis, scoped strictly to this website/document
+        await this.autoSaveBaselineAndSnapshot();
+>>>>>>> 4e892d6db36be35fc5b8d6e0f9d52100fe400b10
       } catch (err) {
         // Do NOT execute workflow on error - clear state and record error
         this.summaryResult = null;
         this.lastAnalysisError = `API call error: ${err.message || 'Unable to complete AI request. Please check Settings.'}`;
-        
+
         // Hide advanced research footer if open
         const footer = this.shadowRoot.getElementById('prospectus-advanced-footer');
         if (footer) footer.style.display = 'none';
@@ -1538,31 +1612,10 @@
 
     // --- Tab 2: What Changed (Structured Shift Cards & Version Tracking) ---
     async renderWhatChangedTab(container) {
-      // 1. If not analyzed yet and no analysis result, show unanalyzed state (matching Summary tab)
-      if (!this.summaryResult && !this.isAnalyzing) {
-        if (this.lastAnalysisError) {
-          container.innerHTML = `
-            <div class="non-finance-view">
-              <div class="analysis-error-card">
-                <div class="error-header">
-                  <span class="error-badge">API Call Error</span>
-                </div>
-                <p class="error-text">${this.lastAnalysisError}</p>
-                <div style="display: flex; gap: 8px; margin-top: 6px;">
-                  <button class="btn-dark-cta" id="btn-what-changed-analyze" style="padding: 7px 14px; font-size: 12.5px;">
-                    Retry Analysis
-                  </button>
-                  <button class="coral-btn" id="btn-error-settings-what" style="font-size: 11.5px; padding: 7px 12px;">
-                    Open Settings
-                  </button>
-                </div>
-              </div>
-              <div class="non-finance-notice">
-                Please verify your API key, provider configuration, or network connection in Prospectus Settings.
-              </div>
-            </div>
-          `;
+      const currentText = this.pageData ? (this.pageData.fullText || this.pageData.riskFactorsText || this.pageData.extractedText || this.pageData.company || '') : '';
+      const currentPeriod = this.pageData ? (this.pageData.periodBadge || this.pageData.filingDate || new Date().toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })) : new Date().toLocaleDateString();
 
+<<<<<<< HEAD
           const retryBtn = this.shadowRoot.getElementById('btn-what-changed-analyze');
           if (retryBtn) retryBtn.addEventListener('click', () => this.runSummaryAnalysis());
 
@@ -1658,10 +1711,31 @@
           [latestRevision.key]: {
             ...latestData,
             whatChanged: items,
+=======
+      // Directly extract what changed items (immediately available even on the first visit)
+      let items = (this.summaryResult && Array.isArray(this.summaryResult.whatChanged) && this.summaryResult.whatChanged.length > 0)
+        ? this.summaryResult.whatChanged
+        : (this.ai ? this.ai.extractDynamicWhatChanged({
+          text: currentText,
+          company: this.pageData ? this.pageData.company : 'Company',
+          ticker: this.pageData ? this.pageData.ticker : 'TICKER',
+          formType: this.pageData ? this.pageData.formType : 'Report',
+        }) : []);
+
+      // Automatically trigger snapshot & baseline persistence in background without blocking UI
+      this.autoSaveBaselineAndSnapshot().catch(() => { });
+
+      // If summaryResult is not yet loaded and user is not analyzing, trigger analysis in background if API key exists
+      if (!this.summaryResult && !this.isAnalyzing) {
+        this.storage.getSettings().then((s) => {
+          if (s && s.apiKey) {
+            this.runSummaryAnalysis().catch(() => { });
+>>>>>>> 4e892d6db36be35fc5b8d6e0f9d52100fe400b10
           }
-        });
+        }).catch(() => { });
       }
 
+<<<<<<< HEAD
       const isFirstVisit = !history || history.length <= 1;
 
       const historyOptionsHTML = (history && history.length > 0)
@@ -1674,6 +1748,24 @@
             return `<option value="${h.key}" ${isLatest ? 'selected' : ''}>${FilingDiffEngine.escapeHTML(label)}</option>`;
           }).join('')
         : `<option value="auto_baseline">Baseline (1st Visit): ${FilingDiffEngine.escapeHTML(currentPeriod)}</option>`;
+=======
+      const scopeKey = this.getSnapshotScopeKey();
+      let history = await this.storage.getFilingHistory(scopeKey);
+
+      const historyOptionsHTML = (history && history.length > 0)
+        ? history.map((snap, idx) => {
+          const isLatest = idx === 0;
+          const isBase = idx === history.length - 1;
+          const label = isLatest
+            ? `Latest Revision: ${snap.period || new Date(snap.savedAt).toLocaleDateString()}`
+            : (isBase ? `Initial Baseline: ${snap.period || new Date(snap.savedAt).toLocaleDateString()}` : `Revision ${history.length - idx}: ${snap.period || new Date(snap.savedAt).toLocaleDateString()}`);
+          return `<option value="${snap.key}" ${isLatest ? 'selected' : ''}>${FilingDiffEngine.escapeHTML(label)}</option>`;
+        }).join('')
+        : `
+          <option value="latest" selected>Latest Revision · ${FilingDiffEngine.escapeHTML(currentPeriod)}</option>
+          <option value="baseline">Initial Baseline · ${FilingDiffEngine.escapeHTML(currentPeriod)}</option>
+        `;
+>>>>>>> 4e892d6db36be35fc5b8d6e0f9d52100fe400b10
 
       const renderCards = (filterType = 'all') => {
         const filtered = items.filter(item => {
@@ -1723,9 +1815,8 @@
 
       container.innerHTML = `
         <div class="what-changed-view">
-          ${
-            this.activeFilingContext
-              ? `
+          ${this.activeFilingContext
+          ? `
               <div class="active-filing-banner">
                 <div class="filing-banner-left">
                   <span class="filing-banner-tag">SEC ${this.activeFilingContext.formType}</span>
@@ -1737,13 +1828,19 @@
                 </div>
               </div>
             `
-              : ''
-          }
+          : ''
+        }
 
           <div class="what-changed-header">
+<<<<<<< HEAD
             <div style="display: flex; align-items: center; gap: 8px;">
               <h2 class="what-changed-title">What changed</h2>
               ${statusBadgeHTML}
+=======
+            <div style="display: flex; align-items: baseline; gap: 8px;">
+              <h2 class="what-changed-title" style="margin-bottom: 0;">What changed</h2>
+              ${this.isAnalyzing ? '<span class="wc-analyzing-pill" style="font-size: 11px; color: #a9583e; font-weight: 500;">✦ Analyzing disclosures in background...</span>' : ''}
+>>>>>>> 4e892d6db36be35fc5b8d6e0f9d52100fe400b10
             </div>
             <select class="wc-filter-select" id="wc-filter-select">
               <option value="all">All changes</option>
@@ -1785,7 +1882,20 @@
       if (historySelect && cardsContainer) {
         historySelect.addEventListener('change', async (e) => {
           const selectedKey = e.target.value;
+          if (selectedKey === 'latest' || selectedKey === 'baseline') {
+            history = await this.storage.getFilingHistory(scopeKey);
+            if (history && history.length > 0) {
+              const target = selectedKey === 'latest' ? history[0] : history[history.length - 1];
+              const data = await this.storage.get(target.key);
+              if (data && data[target.key] && Array.isArray(data[target.key].whatChanged) && data[target.key].whatChanged.length > 0) {
+                items = data[target.key].whatChanged;
+              }
+            }
+            cardsContainer.innerHTML = renderCards(filterSelect ? filterSelect.value : 'all');
+            return;
+          }
           const data = await this.storage.get(selectedKey);
+<<<<<<< HEAD
           if (data && data[selectedKey]) {
             const snap = data[selectedKey];
             if (Array.isArray(snap.whatChanged) && snap.whatChanged.length > 0) {
@@ -1798,6 +1908,10 @@
                 formType: this.pageData.formType
               });
             }
+=======
+          if (data && data[selectedKey] && Array.isArray(data[selectedKey].whatChanged)) {
+            items = data[selectedKey].whatChanged.length > 0 ? data[selectedKey].whatChanged : items;
+>>>>>>> 4e892d6db36be35fc5b8d6e0f9d52100fe400b10
             cardsContainer.innerHTML = renderCards(filterSelect ? filterSelect.value : 'all');
           }
         });
@@ -1809,13 +1923,13 @@
           const revPeriod = `Revision · ${new Date().toLocaleDateString()} ${new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`;
           const freshItems = (this.summaryResult && Array.isArray(this.summaryResult.whatChanged) && this.summaryResult.whatChanged.length > 0)
             ? this.summaryResult.whatChanged
-            : this.ai.extractDynamicWhatChanged({
-                text: currentText,
-                company: this.pageData.company,
-                ticker: this.pageData.ticker,
-                formType: this.pageData.formType
-              });
-          await this.storage.saveFilingSnapshot(scopeKey, this.pageData.formType || 'Document', revPeriod, {
+            : (this.ai ? this.ai.extractDynamicWhatChanged({
+              text: currentText,
+              company: this.pageData ? this.pageData.company : 'Company',
+              ticker: this.pageData ? this.pageData.ticker : 'TICKER',
+              formType: this.pageData ? this.pageData.formType : 'Report'
+            }) : []);
+          await this.storage.saveFilingSnapshot(scopeKey, this.pageData ? (this.pageData.formType || 'Document') : 'Document', revPeriod, {
             text: currentText,
             savedAt: new Date().toISOString(),
             whatChanged: freshItems,
@@ -1849,9 +1963,8 @@
         </div>
 
         <!-- AI Recommended Search Terms Section (Shown ONLY when a document is analyzed) -->
-        ${
-          (isAnalyzed && recTerms.length > 0)
-            ? `
+        ${(isAnalyzed && recTerms.length > 0)
+          ? `
             <div class="explain-recommendations-section">
               <span class="explain-rec-label">✦ AI Recommended Terms in This Document</span>
               <div class="explain-rec-chips" id="explain-rec-chips-container">
@@ -1859,7 +1972,7 @@
               </div>
             </div>
             `
-            : ''
+          : ''
         }
 
         <div class="card-box" id="explain-result-card" style="display: none; margin-top: 12px;">
@@ -1901,10 +2014,12 @@
       const body = this.shadowRoot.getElementById('explain-result-body');
       const input = this.shadowRoot.getElementById('explain-term-input');
 
+      const saveBtn = this.shadowRoot.getElementById('btn-save-explain-note');
       if (input) input.value = term;
       if (card) card.style.display = 'flex';
       if (title) title.textContent = `"${term}" in context`;
       if (body) body.innerHTML = `<div class="loading-shimmer" style="height: 40px;"></div>`;
+      if (saveBtn) saveBtn.style.display = '';
       card.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
 
       let finalExplanation = '';
@@ -1918,11 +2033,10 @@
 
         if (body) body.textContent = finalExplanation;
       } catch (err) {
-        finalExplanation = `In this document, "${term}" is referenced in relation to operational and financial disclosures.`;
+        finalExplanation = '';
         if (body) {
           body.innerHTML = `
-            <div>${finalExplanation}</div>
-            <div class="tab-inline-error-notice" style="margin-top: 10px; padding: 8px 12px; background: #fff5f2; border: 1px solid #f2d4cc; border-radius: 6px; font-size: 12px; color: #a9583e; display: flex; justify-content: space-between; align-items: center;">
+            <div class="tab-inline-error-notice" style="padding: 10px 12px; background: #fff5f2; border: 1px solid #f2d4cc; border-radius: 6px; font-size: 12px; color: #a9583e; display: flex; justify-content: space-between; align-items: center;">
               <span>⚠️ API Error: ${err.message || 'Please check your API key in Settings'}</span>
               <button type="button" class="coral-btn" style="padding: 3px 8px; font-size: 11px; margin-left: 8px; white-space: nowrap;" id="btn-explain-settings">Settings</button>
             </div>
@@ -1932,17 +2046,21 @@
         }
       }
 
-      const saveBtn = this.shadowRoot.getElementById('btn-save-explain-note');
       if (saveBtn) {
-        saveBtn.onclick = () => {
-          this.openSaveNoteModal({
-            title: `Concept: ${term}`,
-            quote: term,
-            note: finalExplanation,
-            category: 'Financial Metrics',
-            ticker: this.pageData.ticker,
-          });
-        };
+        if (!finalExplanation) {
+          saveBtn.style.display = 'none';
+        } else {
+          saveBtn.style.display = '';
+          saveBtn.onclick = () => {
+            this.openSaveNoteModal({
+              title: `Concept: ${term}`,
+              quote: term,
+              note: finalExplanation,
+              category: 'Financial Metrics',
+              ticker: this.pageData.ticker,
+            });
+          };
+        }
       }
     }
 
@@ -2135,9 +2253,8 @@
 
         <!-- Notes List Container -->
         <div id="notebook-list-container" style="display: flex; flex-direction: column; gap: 10px;">
-          ${
-            filtered.length === 0
-              ? `
+          ${filtered.length === 0
+          ? `
               <div style="font-size: 13px; color: #6c6a64; text-align: center; padding: 30px 14px; background: #efe9de; border-radius: 8px; border: 1px dashed #e6dfd8; display: flex; flex-direction: column; align-items: center; gap: 10px;">
                 <div style="font-size: 14px; font-weight: 500; color: #141413;">
                   ${this.notebookSearchQuery || this.notebookCategoryFilter !== 'ALL' ? 'No matching notes found.' : 'Your notebook is empty.'}
@@ -2150,17 +2267,17 @@
                 </button>
               </div>
             `
-              : filtered
-                  .map((entry) => {
-                    const cat = entry.category || 'General';
-                    let catClass = 'general';
-                    if (cat.includes('Risk')) catClass = 'risks';
-                    else if (cat.includes('Financial')) catClass = 'financials';
-                    else if (cat.includes('Operation') || cat.includes('Capex')) catClass = 'operations';
-                    else if (cat.includes('Term') || cat.includes('Valuation')) catClass = 'terms';
+          : filtered
+            .map((entry) => {
+              const cat = entry.category || 'General';
+              let catClass = 'general';
+              if (cat.includes('Risk')) catClass = 'risks';
+              else if (cat.includes('Financial')) catClass = 'financials';
+              else if (cat.includes('Operation') || cat.includes('Capex')) catClass = 'operations';
+              else if (cat.includes('Term') || cat.includes('Valuation')) catClass = 'terms';
 
-                    const hasNoteTicker = entry.ticker && entry.ticker !== 'PAGE' && entry.ticker !== 'PDF';
-                    return `
+              const hasNoteTicker = entry.ticker && entry.ticker !== 'PAGE' && entry.ticker !== 'PDF';
+              return `
             <div class="note-item-card" data-id="${entry.id}">
               <div class="note-card-header">
                 <h4 class="note-title-text">${entry.title || 'Research Note'}</h4>
@@ -2189,9 +2306,9 @@
               </div>
             </div>
           `;
-                  })
-                  .join('')
-          }
+            })
+            .join('')
+        }
         </div>
       `;
 
@@ -2309,7 +2426,7 @@
     // --- Tab 5: Watchlist Daily Digest & Ticker Hub ---
     async renderWatchlistTab(container) {
       if (typeof chrome !== 'undefined' && chrome.runtime && chrome.runtime.sendMessage) {
-        chrome.runtime.sendMessage({ action: 'CLEAR_DIGEST_BADGE' }).catch(() => {});
+        chrome.runtime.sendMessage({ action: 'CLEAR_DIGEST_BADGE' }).catch(() => { });
       }
 
       this.watchlistExpandedTicker = this.watchlistExpandedTicker || null;
@@ -2336,8 +2453,8 @@
         return Boolean(i.hasAnyNew);
       }).length;
       const settings = this.storage ? await this.storage.getSettings() : {};
-      const scheduleMins = settings.watchlistScheduleInterval !== undefined 
-        ? settings.watchlistScheduleInterval 
+      const scheduleMins = settings.watchlistScheduleInterval !== undefined
+        ? settings.watchlistScheduleInterval
         : (settings.enableBackgroundWatchlist !== false ? 1440 : 0);
 
       // Preload quotes and details for expanded card
@@ -2411,14 +2528,13 @@
 
                 <div class="wl-card-right">
                   <div class="wl-card-price-row" id="wl-card-price-box-${item.ticker}">
-                    ${
-                      quote
-                        ? `<span class="wl-card-price">${this.getStockCurrencySymbol(quote || item.stockQuote || item, item.ticker)}${quote.price}</span>
+                    ${quote
+              ? `<span class="wl-card-price">${this.getStockCurrencySymbol(quote || item.stockQuote || item, item.ticker)}${quote.price}</span>
                            <span class="wl-card-change ${quote.isPositive ? 'positive' : 'negative'}">
                              ${quote.isPositive ? '▲' : '▼'} ${quote.changePercent}
                            </span>`
-                        : `<span class="wl-card-price" style="color: #a8a49c; font-size: 13px;">--.--</span>`
-                    }
+              : `<span class="wl-card-price" style="color: #a8a49c; font-size: 13px;">--.--</span>`
+            }
                   </div>
                   <div class="wl-card-status-row">
                     <span class="wl-status-badge ${statusClass}">
@@ -2430,10 +2546,9 @@
               </div>
 
               <!-- Expanded Tracker Detail Pane (Visible on Click) -->
-              ${
-                isExpanded
-                  ? (detail
-                      ? `
+              ${isExpanded
+              ? (detail
+                ? `
                 <div class="wl-detail-tracker-pane" id="wl-detail-pane-${item.ticker}">
                   <div class="wl-tracker-header">
                     <h3 class="wl-tracker-company-title">${detail.company} (${detail.ticker})</h3>
@@ -2465,9 +2580,8 @@
 
                   <!-- Tab Content -->
                   <div class="wl-tracker-tab-content">
-                    ${
-                      activeSubTab === 'updates'
-                        ? `
+                    ${activeSubTab === 'updates'
+                  ? `
                         <div class="wl-tracker-updates-view">
                           <div class="wl-update-header-row">
                             <span class="wl-section-eyebrow">LATEST UPDATE</span>
@@ -2496,16 +2610,15 @@
                           </div>
                         </div>
                       `
-                        : ''
-                    }
+                  : ''
+                }
 
-                    ${
-                      activeSubTab === 'filings'
-                        ? `
+                    ${activeSubTab === 'filings'
+                  ? `
                         <div class="wl-filings-list">
                           ${detail.filings
-                            .map(
-                              (f) => `
+                    .map(
+                      (f) => `
                             <div class="wl-filing-item ${f.isNew ? 'is-new' : ''}">
                               <div class="wl-filing-left">
                                 <span class="wl-filing-form-badge">${f.form}</span>
@@ -2518,16 +2631,15 @@
                               </div>
                             </div>
                           `
-                            )
-                            .join('')}
+                    )
+                    .join('')}
                         </div>
                       `
-                        : ''
-                    }
+                  : ''
+                }
 
-                    ${
-                      activeSubTab === 'news'
-                        ? `
+                    ${activeSubTab === 'news'
+                  ? `
                         <div class="wl-news-view-container">
                           <div class="wl-news-header-meta">
                             <span class="wl-section-eyebrow">MULTI-SOURCE INTELLIGENCE</span>
@@ -2535,8 +2647,8 @@
                           </div>
                           <div class="wl-news-list">
                             ${(detail.news || [])
-                              .map(
-                                (n) => `
+                    .map(
+                      (n) => `
                               <a href="${n.url}" target="_blank" rel="noopener" class="wl-news-item ${n.isNew ? 'is-new' : ''}" data-url="${n.url}" title="Open source article: ${n.title}">
                                 <div class="wl-news-headline-row">
                                   <div class="wl-news-headline">${n.title}</div>
@@ -2550,26 +2662,25 @@
                                 </div>
                               </a>
                             `
-                              )
-                              .join('')}
+                    )
+                    .join('')}
                           </div>
                         </div>
                       `
-                        : ''
-                    }
+                  : ''
+                }
                   </div>
 
                   <!-- 1-Year Stock Price Trend Graph inside expanded tracker -->
-                  ${
-                    detail.history
-                      ? `<div class="wl-detail-chart-wrapper">
+                  ${detail.history
+                  ? `<div class="wl-detail-chart-wrapper">
                           ${this.watchlistService.renderStockTrendHTML(detail.history, detail.company, '1y')}
                         </div>`
-                      : ''
-                  }
+                  : ''
+                }
                 </div>
               `
-                      : `
+                : `
                 <div class="wl-detail-tracker-pane" id="wl-detail-pane-${item.ticker}">
                   <div style="padding: 24px 16px; text-align: center; color: #8e8b82; font-size: 13px; font-family: 'Inter', sans-serif;">
                     <div style="font-weight: 500; color: #141413; margin-bottom: 6px;">Loading ${item.company || item.ticker}...</div>
@@ -2577,8 +2688,8 @@
                   </div>
                 </div>
               `)
-                  : ''
-              }
+              : ''
+            }
             </div>
           `;
         }
@@ -2996,7 +3107,7 @@
                   `;
                 }
               }
-            } catch (e) {}
+            } catch (e) { }
           })
         );
       }
@@ -3290,6 +3401,7 @@
           footerContainer.style.height = `${targetExpandedHeight}px`;
         }
 
+        if (respSaveBtn) respSaveBtn.style.display = '';
         respCard.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
 
         try {
@@ -3333,6 +3445,7 @@
             });
           };
         } catch (err) {
+<<<<<<< HEAD
           let webSources = [];
           if (isWebOn && this.ai) {
             try {
@@ -3389,20 +3502,23 @@
           }
 
           respText.innerHTML = responseHtml;
+=======
+          const errorBanner = `
+            <div class="adv-error-notice" style="padding: 14px 16px; background: #fff5f2; border: 1px solid #f2d4cc; border-radius: 8px; font-size: 13px; color: #a9583e; display: flex; justify-content: space-between; align-items: center;">
+              <div>
+                <strong>⚠️ API Error:</strong> ${err.message || 'Unable to connect to AI provider or model call failed'}.
+              </div>
+              <button type="button" class="coral-btn btn-adv-settings" style="font-size: 11px; padding: 4px 8px; margin-left: 10px; white-space: nowrap;">Settings</button>
+            </div>
+          `;
+          respText.innerHTML = errorBanner;
+>>>>>>> 4e892d6db36be35fc5b8d6e0f9d52100fe400b10
           respCard.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+
+          if (respSaveBtn) respSaveBtn.style.display = 'none';
 
           const settingsBtn = respCard.querySelector('.btn-adv-settings');
           if (settingsBtn) settingsBtn.addEventListener('click', () => this.openSettings());
-
-          respSaveBtn.onclick = () => {
-            this.openSaveNoteModal({
-              title: `Research: ${q}`,
-              quote: `Q: "${q}"`,
-              note: fallback,
-              category: 'General',
-              ticker: this.pageData.ticker,
-            });
-          };
         }
       };
 
@@ -3568,7 +3684,7 @@
             if (typeof chrome !== 'undefined' && chrome.runtime && chrome.runtime.lastError) {
               try {
                 chrome.runtime.sendMessage({ action: 'OPEN_SETTINGS' });
-              } catch (e) {}
+              } catch (e) { }
             }
           });
           return;
